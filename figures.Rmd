@@ -1324,6 +1324,38 @@ supfig2
 ### Supplemental Table 5
 
 ```{r suptab5}
+# make table comparing and contrasting missing and non-missing data in each analysis
+
+## first need to add columns to "maindf" to denote if in each analysis
+maindf <- maindf %>%
+  mutate(mod1 = ifelse(!is.na(AntenatalVisits), "Included", "Excluded"),
+         mod2 = ifelse(!is.na(ModAtt), "Included", "Excluded"),
+         mod3 = ifelse(!is.na(DeliveryHealth), "Included", "Excluded"))
+
+# now make and export three separate tables
+table1::table1(~ as.factor(PregnancyNumber) + AgeAtDelivery + AntenatalVisits +
+                 Education + Scholar + PregnancyPlanned + ContBeMod + ContraceBe +
+                 ContAfMod + ContraceAf + DeliveryPlace + Attendant + 
+                 Refugee + ResStatus | mod1, 
+               data = maindf, overall = FALSE, 
+               render.continuous = c(.="Median [Q1, Q3]"))
+table1::table1(~ as.factor(PregnancyNumber) + AgeAtDelivery + AntenatalVisits +
+                 Education + Scholar + PregnancyPlanned + ContBeMod + ContraceBe +
+                 ContAfMod + ContraceAf + DeliveryPlace + Attendant + 
+                 Refugee + ResStatus | mod2, 
+               data = maindf, overall = FALSE, 
+               render.continuous = c(.="Median [Q1, Q3]"))
+table1::table1(~ as.factor(PregnancyNumber) + AgeAtDelivery + AntenatalVisits +
+                 Education + Scholar + PregnancyPlanned + ContBeMod + ContraceBe +
+                 ContAfMod + ContraceAf + DeliveryPlace + Attendant + 
+                 Refugee + ResStatus | mod3, 
+               data = maindf, overall = FALSE, 
+               render.continuous = c(.="Median [Q1, Q3]"))
+```
+
+### Supplemental Table 6
+
+```{r suptab6}
 # easier to create tables in a reproducible way than copy and pasting from html output
 mod1tab <- mod1s %>% 
   mutate(Mod1 = paste0(round(Effect, 2), 
@@ -1350,12 +1382,12 @@ mod1sup5 <- mod1tab %>%
 rownames(mod1sup5) <- rownames(mod2tab)
 
 # combine
-write.csv(cbind(mod1sup5, mod2tab, mod3tab), "./tabs/suptab5.csv", row.names = TRUE)
+write.csv(cbind(mod1sup5, mod2tab, mod3tab), "./tabs/suptab6.csv", row.names = TRUE)
 ```
 
-### Supplemental Tables 7-9
+### Supplemental Tables 8-10
 
-```{r suptab7_9}
+```{r suptab8_10}
 # easier to create tables in a reproducible way than copy and pasting from html output
 # suptab7
 mod1s1tab <- mod1sens1 %>% 
@@ -1389,7 +1421,7 @@ rownames(mod1s4tab) <- rownames(mod1tab)
 rownames(mod1s5tab) <- rownames(mod1tab)
 
 write.csv(cbind(mod1tab, mod1s1tab, mod1s2tab, mod1s3tab, mod1s4tab, mod1s5tab), 
-          "./tabs/suptab7.csv", row.names = TRUE)
+          "./tabs/suptab8.csv", row.names = TRUE)
 
 # suptab8
 mod2s1tab <- mod2sens1 %>% 
@@ -1423,7 +1455,7 @@ rownames(mod2s4tab) <- rownames(mod2tab)
 rownames(mod2s5tab) <- rownames(mod2tab)
 
 write.csv(cbind(mod2tab, mod2s1tab, mod2s2tab, mod2s3tab, mod2s4tab, mod2s5tab), 
-          "./tabs/suptab8.csv", row.names = TRUE)
+          "./tabs/suptab9.csv", row.names = TRUE)
 
 # suptab9
 mod3s1tab <- mod3sens1 %>% 
@@ -1457,5 +1489,5 @@ rownames(mod3s4tab) <- rownames(mod3tab)
 rownames(mod3s5tab) <- rownames(mod3tab)
 
 write.csv(cbind(mod3tab, mod3s1tab, mod3s2tab, mod3s3tab, mod3s4tab, mod3s5tab), 
-          "./tabs/suptab9.csv", row.names = TRUE)
+          "./tabs/suptab10.csv", row.names = TRUE)
 ```
