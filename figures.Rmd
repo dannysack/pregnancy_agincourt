@@ -1,0 +1,1461 @@
+---
+title: "Figures"
+author: "Danny Sack<br><small>Division of Epidemiology<br>Vanderbilt University School of Medicine</small>"
+date: "<small>`r Sys.Date()`</small>"
+output:
+  rmdformats::readthedown:
+    code_folding: hide
+    lightbox: true
+description: "Figures"
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(rms)
+library(kableExtra)
+library(cowplot)
+library(ggpubr)
+library(visdat)
+library(DiagrammeR)
+library(metafor)
+library(extrafont)
+library(DiagrammeRsvg)
+library(rsvg)
+loadfonts()
+knitrSet(lang='markdown', fig.path='figures/', fig.align='center', cache=TRUE)
+options(prType='html')
+```
+
+```{r prep, include=FALSE}
+# pull in data from "analysis.Rmd"
+options(LoadPath = "./analysis_R_data/")
+# descriptive data
+Load(maindf)
+# model 1
+Load(mod1df)
+Load(mod1)
+Load(mod1s) # for summary table
+Load(mod1sfp) # for forest plot
+Load(val1)
+# model 2
+Load(mod2df)
+Load(mod2)
+Load(mod2s)
+Load(mod2sfp) # for forest plot
+Load(val2)
+Load(cal2)
+# model 3
+Load(mod3df)
+Load(mod3) # summary table
+Load(mod3s) # summary table
+Load(mod3sfp) # for forest plot
+Load(val3)
+Load(cal3)
+
+# sensitivity analyses
+Load(mod1sens1)
+Load(mod1sens2)
+Load(mod1sens3)
+Load(mod1sens4)
+Load(mod1sens5)
+
+Load(mod2sens1)
+Load(mod2sens2)
+Load(mod2sens3)
+Load(mod2sens4)
+Load(mod2sens5)
+
+Load(mod3sens1)
+Load(mod3sens2)
+Load(mod3sens3)
+Load(mod3sens4)
+Load(mod3sens5)
+```
+
+# Figures
+
+## Figure 1: Study Flowchart
+
+```{r flow}
+# create figure 1, study flowchart
+
+# set font
+par(family = "Arial")
+
+# get numbers for sensitivity analysis
+# nrow(deidentified %>% filter(ObsToDelivery < 182.5)) # 6 months
+# nrow(deidentified %>% filter(ObsToDelivery < 730.5)) # 2 years
+# nrow(deidentified %>% filter(OutCome == "Single Live Birth"))
+# nrow(deidentified %>% filter(PregnancyNumber == 1))
+# nrow(deidentified %>% filter(PregnancyNumber == 1 & OutCome == "Single Live Birth"))
+fig1 <- grViz("digraph flowchart {
+      # main nodes
+      node [fontname = Arial, shape = rectangle, penwidth = 2]        
+      all [label = 'Agincourt Database pregnancies\\nthrough October 2020 (n = 54,687)']
+      fin [label = 'Pregnancies eligible for analysis\\n(n = 51,355)']
+      exc [label = 'Excluded pregnancies\\n(n = 3,332)']
+      mod1 [label = 'Antenatal Vists\\n(n = 42,878)']
+      mod1sens1 [label = '(n = 17,779)']
+      mod1sens2 [label = '(n = 40,277)']
+      mod1sens3 [label = '(n = 41,747)']
+      mod1sens4 [label = '(n = 28,901)']
+      mod1sens5 [label = '(n = 28,176)']
+      mod2 [label = 'Skilled Birth Attendant\\n(n = 48,646)']
+      mod2sens1 [label = '(n = 19,239)']
+      mod2sens2 [label = '(n = 45,592)']
+      mod2sens3 [label = '(n = 47,526)']
+      mod2sens4 [label = '(n = 33,723)']
+      mod2sens5 [label = '(n = 33,000)']
+      mod3 [label = 'Health Facility Delivery\\n(n = 50,956)']
+      mod3sens1 [label = '(n = 20,275)']
+      mod3sens2 [label = '(n = 47,787)']
+      mod3sens3 [label = '(n = 49,756)']
+      mod3sens4 [label = '(n = 35,749)']
+      mod3sens5 [label = '(n = 34,960)']
+      primexc [label = 'Missing birth year (n = 53) \\n 1991 births (n = 16) \\n 1992 births (n = 934) \\n 2019 births (n = 1,498) \\n 2020 births (n = 22) \\n Duplicate births (n = 685) \\n Delivery date on or after observation date (n = 124)']
+      sens [label = 'Sensitivity Analyses']
+      sens1 [label = 'Births < 6 months before observation date\\n(n = 20,406)']
+      sens2 [label = 'Births < 2 years before observation date\\n(n = 48,124)']
+      sens3 [label = 'Full singleton births\\n(n = 50,138)']
+      sens4 [label = 'First recorded births\\n(n = 36,008)']
+      sens5 [label = 'Full singleton first recorded births\\n(n = 35,207)']
+      
+      # dummy nodes
+      node [shape=none, width=0, height=0, label='']
+      n1
+
+      # edge definitions with the node IDs
+      n1 -> fin
+      fin -> mod1
+      fin -> mod2
+      fin -> mod3
+      {rank = same; n1 -> exc -> primexc}
+      {rank = same; mod1; mod2; mod3; sens}
+      
+      edge[dir = none]
+      all -> n1
+      sens -> sens1 -> sens2 -> sens3 -> sens4 -> sens5
+      mod1 -> mod1sens1 -> mod1sens2 -> mod1sens3 -> mod1sens4 -> mod1sens5
+      mod2 -> mod2sens1 -> mod2sens2 -> mod2sens3 -> mod2sens4 -> mod2sens5
+      mod3 -> mod3sens1 -> mod3sens2 -> mod3sens3 -> mod3sens4 -> mod3sens5
+      {rank = same; sens1; mod1sens1; mod2sens1; mod3sens1}
+      {rank = same; sens2; mod1sens2; mod2sens2; mod3sens2}
+      {rank = same; sens3; mod1sens3; mod2sens3; mod3sens3}
+      {rank = same; sens4; mod1sens4; mod2sens4; mod3sens4}
+      {rank = same; sens5; mod1sens5; mod2sens5; mod3sens5}
+      }
+      ",
+      width = 800, height = 800)
+
+# export
+fig1 %>% 
+  export_svg() %>%
+  charToRaw() %>%
+  rsvg_pdf("./figures/fig1.pdf")
+# embed fonts
+embedFonts("./figures/fig1.pdf", fontpaths = "/Library/Fonts/Microsoft/Arial.ttf")
+```
+
+**Figure Legend**: Figure 1 shows the number of pregnancies included in each stage of the analysis.
+
+## Figure 2: Descriptive Plots by Delivery Year
+
+```{r fig2_prep, results = FALSE, echo = FALSE, fig.width=8}
+## Create figure 2
+
+# set theme for text size
+theme_fig2 <- theme(text = element_text(family = "Arial"),
+                    legend.title = element_text(size = 20),
+                    legend.text = element_text(size = 18),
+                    axis.text = element_text(size = 16),
+                    axis.title = element_text(size = 22))
+
+# number of antenatal visits
+ant_df <- maindf %>% group_by(DeliveryYear) %>%
+  summarise(Visit0 = sum(AntenatalVisits >= 0 & AntenatalVisits < 4, na.rm = TRUE),
+            Visit1 = sum(AntenatalVisits > 3 & AntenatalVisits < 8, na.rm = TRUE),
+            Visit2 = sum(AntenatalVisits > 7, na.rm = TRUE),
+            Missing = sum(is.na(AntenatalVisits))) %>%
+  gather(key = "key", value = "value", Visit0:Missing) %>%
+  filter(!is.na(DeliveryYear)) %>%
+  mutate(key = factor(key, levels = c("Visit0", "Visit1", "Visit2", "Missing")))
+
+ant_num <- ggplot(ant_df, aes(x = DeliveryYear, y = value, group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "stack") +
+  scale_fill_viridis_d(name = "Visits",
+                      labels = c("0-3", 
+                                 "4-7",
+                                 "8+", "Missing")) +
+  ylab("Pregnancies") + xlab("") + 
+  ggtitle("") +
+  theme_pubr() + theme(legend.position="none") +
+  theme_fig2
+
+ant_per <- ggplot(ant_df, aes(x = DeliveryYear, y = value, group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "fill") +
+  scale_fill_viridis_d(name = "Visits",
+                      labels = c("0-3", 
+                                 "4-7",
+                                 "8+", "Missing")) +
+  ylab("Proportion of Pregnancies") + xlab("") + 
+  ggtitle("") +
+  theme_pubr() + theme(legend.position = "bottom") +
+  theme_fig2
+  
+
+# get legend
+ant_leg <- get_legend(ant_per)
+
+# antenatal visits
+ant_row <- ggarrange(ant_num, ant_per, legend = "bottom", legend.grob = ant_leg)
+ant_plot <- annotate_figure(ant_row) + labs_pubr()
+
+# postpartum contraception
+ppcont_df <- maindf %>% group_by(DeliveryYear) %>%
+  summarise(None = sum(ContraceAf == "None", na.rm = TRUE),
+            Injection = sum(ContraceAf == "Injection", na.rm = TRUE),
+            Pill = sum(ContraceAf == "Pill", na.rm = TRUE),
+            Condom = sum(ContraceAf == "Condom", na.rm = TRUE),
+            `Emergency Contraceptive` = sum(ContraceAf == "Emergency Contraceptive", na.rm = TRUE),
+            Sterilisation = sum(ContraceAf == "Sterilisation", na.rm = TRUE),
+            `>1 Type` = sum(ContraceAf == ">1 Type", na.rm = TRUE),
+            Traditional = sum(ContraceAf == "Traditional", na.rm = TRUE),
+            Loop = sum(ContraceAf == "Loop", na.rm = TRUE),
+            Abstinence = sum(ContraceAf == "Abstinence", na.rm = TRUE),
+            Missing = sum(is.na(ContraceAf))) %>%
+  gather(key = "key", value = "value", None:Missing) %>%
+  filter(!is.na(DeliveryYear)) %>%
+  mutate(key = factor(key, levels = c("None", "Injection", "Pill", "Sterilisation",
+                                      "Condom", "Emergency Contraceptive", ">1 Type",
+                                      "Traditional", "Loop", "Abstinence",
+                                      "Missing")))
+
+ppcont_num <- ggplot(ppcont_df, aes(x = DeliveryYear, y = value, 
+                                      group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "stack", show.legend = FALSE) +
+  scale_fill_viridis_d() +
+  ylab("Pregnancies") + xlab("") + 
+  ggtitle("") +
+  theme_pubr() +
+  theme_fig2
+
+ppcont_per <- ggplot(ppcont_df, aes(x = DeliveryYear, y = value, 
+                                      group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "fill") +
+  scale_fill_viridis_d(name = "Type") +
+  ylab("Proportion of Pregnancies") + xlab("") + 
+  ggtitle("") +
+  theme_pubr() + theme(legend.position = "bottom") +
+  theme_fig2
+  
+
+# get legend
+ppcont_leg <- get_legend(ppcont_per)
+
+# post-preg cont
+ppcont_row <- ggarrange(ppcont_num, ppcont_per, legend = "bottom", legend.grob = ppcont_leg)
+ppcont_plot <- annotate_figure(ppcont_row) + labs_pubr()
+
+# delivery location
+loc_df <- maindf %>% group_by(DeliveryYear) %>%
+  summarise(Hospital = sum(DeliveryPlace == "Hospital", na.rm = TRUE),
+            Clinic = sum(DeliveryPlace == "Clinic", na.rm = TRUE),
+            `Health Centre` = sum(DeliveryPlace == "Health Centre", na.rm = TRUE),
+            Home = sum(DeliveryPlace == "Home", na.rm = TRUE),
+            Other = sum(DeliveryPlace == "Other", na.rm = TRUE),
+            Missing = sum(is.na(DeliveryPlace))) %>%
+  gather(key = "key", value = "value", Hospital:Missing) %>%
+  filter(!is.na(DeliveryYear)) %>%
+  mutate(key = factor(key, levels = c("Hospital", "Clinic", "Health Centre", 
+                                      "Home", "Other",  
+                                      "Missing")))
+
+loc_num <- ggplot(loc_df, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "stack", show.legend = FALSE) +
+  scale_fill_viridis_d() +
+  ylab("Pregnancies") + xlab("") + 
+  ggtitle("") +
+  theme_pubr() +
+  theme_fig2
+
+loc_per <- ggplot(loc_df, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "fill") +
+  scale_fill_viridis_d(name = "Location") +
+  ylab("Proportion of Pregnancies") + xlab("") +
+  ggtitle("") +
+  theme_pubr() + theme(legend.position = "bottom") +
+  theme_fig2
+
+# get legend
+loc_leg <- get_legend(loc_per)
+
+# loc
+loc_row <- ggarrange(loc_num, loc_per, legend = "bottom", legend.grob = loc_leg)
+loc_plot <- annotate_figure(loc_row) + labs_pubr()
+
+# delivery attendant
+att_df <- maindf %>% group_by(DeliveryYear) %>%
+  summarise(Nurse = sum(Attendant == "Nurse", na.rm = TRUE),
+            Midwife = sum(Attendant == "Midwife", na.rm = TRUE),
+            Doctor = sum(Attendant == "Doctor", na.rm = TRUE),
+            `Family Member` = sum(Attendant == "Family Member", na.rm = TRUE),
+            Nobody = sum(Attendant == "Nobody", na.rm = TRUE),
+            `Community Member` = sum(Attendant == "Community Member", na.rm = TRUE),
+            Other = sum(Attendant == "Other", na.rm = TRUE),
+            Missing = sum(is.na(Attendant))) %>%
+  gather(key = "key", value = "value", Nurse:Missing) %>%
+  filter(!is.na(DeliveryYear)) %>%
+  mutate(key = factor(key, levels = c("Doctor", "Midwife", "Nurse",   
+                                      "Family Member", "Community Member", 
+                                      "Other", "Nobody", "Missing")))
+
+att_num <- ggplot(att_df, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "stack", show.legend = FALSE) +
+  scale_fill_viridis_d() +
+  ylab("Pregnancies") + xlab("") + 
+  ggtitle("") +
+  theme_pubr() +
+  theme_fig2
+
+att_per <- ggplot(att_df, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "fill") +
+  scale_fill_viridis_d(name = "Attendant") +
+  ylab("Proportion of Pregnancies") + xlab("") +
+  ggtitle("") +
+  theme_pubr() + theme(legend.position = "bottom") +
+  theme_fig2
+
+# get legend
+att_leg <- get_legend(att_per)
+
+# att
+att_row <- ggarrange(att_num, att_per, legend = "bottom", legend.grob = att_leg)
+att_plot <- annotate_figure(att_row) + labs_pubr()
+```
+
+```{r fig2, fig.width=20, fig.height=15}
+# combine above plots into figure 2
+fig2 <- ggarrange(ant_plot, loc_plot, 
+          att_plot, ppcont_plot,
+          ncol = 2, nrow = 2,
+          labels = c("a. Antenatal Visits by Delivery Year",
+                     "b. Delivery Location by Delivery Year",
+                     "c. Delivery Attendant by Delivery Year",
+                     "d. Intention/Current Postpartum Contraceptive Use by Delivery Year"),
+          font.label = list(size = 20),
+          hjust = -0.05, vjust = 1.25)
+
+fig2
+ggsave("./figures/fig2.pdf", width = 20, height = 15)
+embed_fonts("./figures/fig2.pdf")
+```
+
+## Figure 3: Model Forest Plots
+
+```{r for, results = FALSE, fig.width = 12, fig.height = 12}
+## Create forest plots for figure 3, note, now using log scale
+# set font
+par(family = "Arial")
+# mod 1
+tiff(file = "./figures/mod1forest.tiff", units = "in", width = 12, height = 12, res = 300)
+forest(x = log(mod1sfp$Effect), ci.lb = log(mod1sfp$`Lower 0.95`), ci.ub = log(mod1sfp$`Upper 0.95`),
+       slab = mod1sfp$name,  
+       header = "a. Ordinal Model for Antenatal Visit Attendance", 
+       cex = 1.7,
+       subset = order(-mod1sfp$num), refline = log(1), xlab = "Adjusted Odds Ratio",
+       top = 2, psize = 1, atransf = exp,
+       ilab.pos = c(4), xlim = c(-15, 8), alim = c(-3, log(12)),
+       rows = c(1, 3:4, 6:7, 9:10, 12, 14:15, 17:18, 20, 22:24), 
+       ylim = c(0, 27))
+# add text for subgroups
+text(-15, c(2, 5, 8, 11, 13, 16, 19, 21, 25), 
+     pos=4, c("Student",
+              "Residency Status vs. Permanent",
+              "Nationality vs. South African",
+              "Pregnancy Intention",
+              "Previous Pregnancies",
+              "Years of Education",
+              "Delivery Year",
+              "Previous Modern Contraceptive Use",
+              "Age"),
+     cex = 1.7, font =2)
+dev.off()
+
+# mod 2
+tiff(file = "./figures/mod2forest.tiff", units = "in", width = 12, height = 12, res = 300)
+forest(x = log(mod2sfp$Effect), ci.lb = log(mod2sfp$`Lower 0.95`), ci.ub = log(mod2sfp$`Upper 0.95`),
+       slab = mod2sfp$name, 
+       header = "b. Logistic Model for Skilled Birth Attendant Presence", 
+       cex = 1.7,
+       subset = order(-mod2sfp$num), refline = log(1), xlab = "Adjusted Odds Ratio",
+       top = 2, psize = 1, atransf = exp,
+       ilab.pos = c(4), xlim = c(-15, 8), alim = c(-3, log(6)),
+       rows = c(1, 3:4, 6:7, 9:10, 12, 14:15, 17:18, 20, 22:23, 25:27), 
+       ylim = c(0, 30))
+# add text for subgroups
+text(-15, c(2, 5, 8, 11, 13, 16, 19, 21, 24, 28), 
+     pos=4, c("Student",
+              "Residency Status vs. Permanent",
+              "Nationality vs. South African",
+              "Pregnancy Intention",
+              "Previous Pregnancies",
+              "Years of Education",
+              "Delivery Year",
+              "Previous Modern Contraceptive Use",
+              "Antenatal Visits",
+              "Age"),
+     cex = 1.7, font =2)
+dev.off()
+
+# mod 3
+tiff(file = "./figures/mod3forest.tiff", units = "in", width = 12, height = 12, res = 300)
+forest(x = log(mod3sfp$Effect), ci.lb = log(mod3sfp$`Lower 0.95`), ci.ub = log(mod3sfp$`Upper 0.95`),
+       slab = mod3sfp$name, 
+       header = "a. Logistic Model for Health Facility Delivery", 
+       cex = 1.7,
+       subset = order(-mod3sfp$num), refline = log(1), xlab = "Adjusted Odds Ratio",
+       top = 2, psize = 1, atransf = exp,
+       ilab.pos = c(4), xlim = c(-15, 8), alim = c(-3, log(5)),
+       rows = c(1, 3:4, 6:7, 9:10, 12, 14:15, 17:18, 20, 22:23, 25:27), 
+       ylim = c(0, 30))
+# add text for subgroups
+text(-15, c(2, 5, 8, 11, 13, 16, 19, 21, 24, 28), 
+     pos=4, c("Student",
+              "Residency Status vs. Permanent",
+              "Nationality vs. South African",
+              "Pregnancy Intention",
+              "Previous Pregnancies",
+              "Years of Education",
+              "Delivery Year",
+              "Previous Modern Contraceptive Use",
+              "Antenatal Visits",
+              "Age"),
+     cex = 1.7, font =2)
+dev.off()
+```
+
+```{r fig3, fig.height=5, fig.width=10}
+# oull in tiffs together so they can be combined into one figure
+f1 <- ggdraw() + draw_image(knitr::include_graphics("./figures/mod1forest.tiff"))
+f2 <- ggdraw() + draw_image(knitr::include_graphics("./figures/mod2forest.tiff"))
+f3 <- ggdraw() + draw_image(knitr::include_graphics("./figures/mod3forest.tiff")) # will use later
+# save f3 for later
+fig3 <- ggarrange(f1, f2, nrow = 1)
+fig3
+ggsave("./figures/fig3.pdf", width = 10, height = 5)
+embed_fonts("./figures/fig3.pdf")
+```
+
+**Figure Legend**: Figure 3 shows the forest plots for the predictors of: a) an additional antenatal care visit; b) skilled birth attendant presence at delivery; and c) health facility delivery. CI: confidence interval.
+
+## Figure 4: Skilled Birth Attendance and Health Facility Delivery by Nationality and Residency
+
+```{r fig4, fig.height=8, fig.width=10}
+## Create figure 4
+# mod 1
+dd <- datadist(mod1df)
+options(datadist = 'dd')
+
+# function of Median plot for model 1
+qu1 <- Quantile(mod1)
+med1 <- function(x) qu1(.5, x)
+
+# nationality
+pe1_mig <- Predict(mod1, DeliveryYear, Refugee, fun = med1) %>%
+  filter(Refugee != "Other") %>%
+  ggplot() + 
+  labs(title = "a. Antenatal Visits by Nationality",
+       caption = "") +
+  theme_pubclean() +
+  theme(text = element_text(family = "Arial")) +
+  scale_y_continuous(name = "Median Antenatal Visits", 
+                     breaks = seq(0, 10, 2)) +
+  scale_x_continuous(breaks = seq(1994, 2018, 8)) +
+  scale_color_manual(name = "Nationality", 
+                       labels = c("South African", "Mozambican", "Other"),
+                       values = c("#374E55FF", "#DF8F44FF")) +
+  coord_cartesian(ylim = c(0, 10)) + 
+  theme(plot.title = element_text(face = "bold"))
+
+# residency status
+pe1_res <- Predict(mod1, DeliveryYear, ResStatus, fun = med1) %>%
+  filter(ResStatus != "Other") %>%
+  ggplot() + 
+  labs(title = "c. Antenatal Visits by Residency",
+       caption = "") +
+  theme_pubclean() +
+  theme(text = element_text(family = "Arial")) +
+  scale_y_continuous(name = "Median Antenatal Visits", 
+                     breaks = seq(0, 10, 2)) +
+  scale_x_continuous(breaks = seq(1994, 2018, 8)) +
+  scale_color_manual(name = "Residence", 
+                       labels = c("Permanent", "Temporary", "Other"),
+                     values = c("#B24745FF", "#79AF97FF")) +
+  coord_cartesian(ylim = c(0, 10)) + 
+  theme(plot.title = element_text(face = "bold"))
+
+# mod 2, no need for median function, because using lrm model
+dd <- datadist(mod2df)
+options(datadist = 'dd')
+
+# nationality
+pe2_mig <- Predict(mod2, DeliveryYear, Refugee, fun = plogis) %>%
+  filter(Refugee != "Other") %>%
+  ggplot() + 
+  labs(title = "b. Skilled Birth Attendant by Nationality",
+       caption = "") +
+  theme_pubclean() +
+  theme(text = element_text(family = "Arial")) +
+  scale_y_continuous(name = "Proportion", 
+                     breaks = seq(0, 1, 0.2)) +
+  scale_x_continuous(breaks = seq(1994, 2018, 8)) +
+  scale_color_manual(name = "Nationality", 
+                       labels = c("South African", "Mozambican", "Other"),
+                       values = c("#374E55FF", "#DF8F44FF")) +
+  coord_cartesian(ylim = c(0, 1)) + 
+  theme(plot.title = element_text(face = "bold"))
+
+# residency status
+pe2_res <- Predict(mod2, DeliveryYear, ResStatus, fun = plogis) %>%
+  filter(ResStatus != "Other") %>%
+  ggplot() + 
+  labs(title = "d. Skilled Birth Attendant by Residency",
+       caption = "") +
+  theme_pubclean() +
+  theme(text = element_text(family = "Arial")) +
+  scale_y_continuous(name = "Proportion", 
+                     breaks = seq(0, 1, 0.2)) +
+  scale_x_continuous(breaks = seq(1994, 2018, 8)) +
+  scale_color_manual(name = "Residence", 
+                       labels = c("Permanent", "Temporary", "Other"),
+                     values = c("#B24745FF", "#79AF97FF")) +
+  coord_cartesian(ylim = c(0, 1)) + 
+  theme(plot.title = element_text(face = "bold"))
+
+# mod 3, for use as a supplemental figure
+dd <- datadist(mod3df)
+options(datadist = 'dd')
+
+# nationality
+pe3_mig <- Predict(mod3, DeliveryYear, Refugee, fun = plogis) %>%
+  filter(Refugee != "Other") %>%
+  ggplot() + 
+  labs(title = "",
+       caption = "") +
+  theme_pubclean() +
+  theme(text = element_text(family = "Arial")) +
+  scale_y_continuous(name = "Proportion", 
+                     breaks = seq(0, 1, 0.2)) +
+  scale_x_continuous(breaks = seq(1994, 2018, 8)) +
+  scale_color_manual(name = "Nationality", 
+                       labels = c("South African", "Mozambican", "Other"),
+                       values = c("#374E55FF", "#DF8F44FF")) +
+  coord_cartesian(ylim = c(0, 1))
+
+# residency status
+pe3_res <- Predict(mod3, DeliveryYear, ResStatus, fun = plogis) %>%
+  filter(ResStatus != "Other") %>%
+  ggplot() + 
+  labs(title = "",
+       caption = "") +
+  theme_pubclean() +
+  theme(text = element_text(family = "Arial")) +
+  scale_y_continuous(name = "Proportion", 
+                     breaks = seq(0, 1, 0.2)) +
+  scale_x_continuous(breaks = seq(1994, 2018, 8)) +
+  scale_color_manual(name = "Residence", 
+                       labels = c("Permanent", "Temporary", "Other"),
+                     values = c("#B24745FF", "#79AF97FF")) +
+  coord_cartesian(ylim = c(0, 1))
+
+
+
+fig3top <- ggarrange(pe1_mig, pe2_mig, nrow = 1,
+                  common.legend = TRUE,
+                  legend = "bottom",
+                  hjust = -0.1)
+
+fig3bot <- ggarrange(pe1_res, pe2_res, nrow = 1,
+                  common.legend = TRUE,
+                  legend = "bottom",
+                  hjust = -0.1)
+
+
+fig4 <- ggarrange(fig3top, fig3bot, ncol = 1)
+
+fig4
+ggsave("./figures/fig4.pdf", width = 10, height = 8)
+embed_fonts("./figures/fig4.pdf")
+```
+
+**Figure Legend**: Figure 4 shows the predicted number of antenatal visits and proportion of deliveries staffed with a skilled birth attendant by nationality and residency status over time from 1993 to 2018.
+
+# Supplemental Figures
+
+## Supplemental Figure 1: Descriptive Plots by Delivery Year
+
+```{r sup1_prep, results = FALSE, echo = FALSE, fig.width=8}
+## Create supplementary figure 1, similar to figure 2, just other covariates
+
+# pregnancy intention
+int_df <- maindf %>% group_by(DeliveryYear) %>%
+  summarise(No = sum(PregnancyPlanned == "No", na.rm = TRUE),
+            Other = sum(PregnancyPlanned == "Other", na.rm = TRUE),
+            Yes = sum(PregnancyPlanned == "Yes", na.rm = TRUE),
+            Missing = sum(is.na(PregnancyPlanned))) %>%
+  gather(key = "key", value = "value", No:Missing) %>%
+  filter(!is.na(DeliveryYear)) %>%
+  mutate(key = factor(key, levels = c("No", "Other", "Yes", "Missing")))
+
+int_num <- ggplot(int_df, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "stack", show.legend = FALSE) +
+  scale_fill_viridis_d(name = "",
+                       labels = c("Unintended", "Other",
+                                  "Intended", "Missing")) +
+  ylab("Pregnancies") + xlab("") + 
+  ggtitle("") +
+  theme_pubr() +
+  theme_fig2
+
+int_per <- ggplot(int_df, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "fill") +
+  scale_fill_viridis_d(name = "Intention",
+                       labels = c("Unintended", "Other",
+                                  "Intended", "Missing")) +
+  ylab("Proportion of Pregnancies") + xlab("") + 
+  ggtitle("") +
+  theme_pubr() + theme(legend.position = "bottom") +
+  theme_fig2
+
+# get legend
+int_leg <- get_legend(int_per)
+
+# pregnancy intention
+int_row <- ggarrange(int_num, int_per, legend = "bottom", legend.grob = int_leg)
+int_plot <- annotate_figure(int_row) + labs_pubr()
+
+# pre-pregnancy contraception
+pcont_df <- maindf %>% group_by(DeliveryYear) %>%
+  summarise(None = sum(ContraceBe == "None", na.rm = TRUE),
+            Injection = sum(ContraceBe == "Injection", na.rm = TRUE),
+            Pill = sum(ContraceBe == "Pill", na.rm = TRUE),
+            Condom = sum(ContraceBe == "Condom", na.rm = TRUE),
+            Sterilisation = sum(ContraceBe == "Sterilisation", na.rm = TRUE),
+            `>1 Type` = sum(ContraceBe == ">1 Type", na.rm = TRUE),
+            Traditional = sum(ContraceBe == "Traditional", na.rm = TRUE),
+            Loop = sum(ContraceBe == "Loop", na.rm = TRUE),
+            Abstinence = sum(ContraceBe == "Abstinence", na.rm = TRUE),
+            Missing = sum(is.na(ContraceBe))) %>%
+  gather(key = "key", value = "value", None:Missing) %>%
+  filter(!is.na(DeliveryYear)) %>%
+  mutate(key = factor(key, levels = c("None", "Injection", "Pill", "Sterilisation",
+                                      "Condom", ">1 Type",
+                                      "Traditional", "Loop", "Abstinence",
+                                      "Missing")))
+
+pcont_num <- ggplot(pcont_df, aes(x = DeliveryYear, y = value, 
+                                      group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "stack", show.legend = FALSE) +
+  scale_fill_viridis_d() +
+  ylab("Pregnancies") + xlab("") + 
+  ggtitle("") +
+  theme_pubr() +
+  theme_fig2
+
+pcont_per <- ggplot(pcont_df, aes(x = DeliveryYear, y = value, 
+                                      group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "fill") +
+  scale_fill_viridis_d(name = "Type") +
+  ylab("Proportion of Pregnancies") + xlab("") + 
+  ggtitle("") +
+  theme_pubr() + theme(legend.position = "bottom") +
+  theme_fig2
+
+# get legend
+pcont_leg <- get_legend(pcont_per)
+
+# pre-preg cont
+pcont_row <- ggarrange(pcont_num, pcont_per, legend = "bottom", legend.grob = pcont_leg)
+pcont_plot <- annotate_figure(pcont_row) + labs_pubr()
+
+# age groups
+age_df <- maindf %>% group_by(DeliveryYear) %>%
+  summarise(Age1 = sum(AgeAtDelivery < 15, na.rm = TRUE),
+            Age2 = sum(AgeAtDelivery < 20  & AgeAtDelivery >= 15, na.rm = TRUE),
+            Age3 = sum(AgeAtDelivery < 25 & AgeAtDelivery >= 20, na.rm = TRUE),
+            Age4 = sum(AgeAtDelivery < 30 & AgeAtDelivery >= 25, na.rm = TRUE),
+            Age5 = sum(AgeAtDelivery < 35 & AgeAtDelivery >= 30, na.rm = TRUE),
+            Age6 = sum(AgeAtDelivery < 40 & AgeAtDelivery >= 35, na.rm = TRUE),
+            Age7 = sum(AgeAtDelivery < 45 & AgeAtDelivery >= 40, na.rm = TRUE),
+            Age8 = sum(AgeAtDelivery < 50 & AgeAtDelivery >= 45, na.rm = TRUE),
+            Age9 = sum(AgeAtDelivery >= 50, na.rm = TRUE),
+            Missing = sum(is.na(AgeAtDelivery))) %>% # lots of zeros are likely missing
+  gather(key = "key", value = "value", Age1:Missing) %>%
+  filter(!is.na(DeliveryYear)) %>%
+  mutate(key = factor(key, levels = c("Age1", "Age2", "Age3", "Age4",
+                                      "Age5", "Age6", "Age7", "Age8",
+                                      "Age9",  "Missing")))
+
+age_num <- ggplot(age_df, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "stack", show.legend = FALSE) +
+  scale_fill_viridis_d() +
+  ylab("Pregnancies") + xlab("") + 
+  ggtitle("") +
+  theme_pubr() +
+  theme_fig2
+
+age_per <- ggplot(age_df, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "fill") +
+  scale_fill_viridis_d(name = "Age",
+                       labels = c("11-14", "15-19", "20-24", "25-29", 
+                                  "30-34", "35-39", "40-44", "45-49",
+                                  "50-55", "Missing")) +
+  ylab("Proportion of Pregnancies") + xlab("") + 
+  ggtitle("") +
+  theme_pubr() + theme(legend.position = "bottom") +
+  theme_fig2
+
+# age
+age_row <- ggarrange(age_num, age_per, common.legend = TRUE, legend = "bottom")
+age_plot <- annotate_figure(age_row)  + labs_pubr()
+
+# number of years of education
+edu_df <- maindf %>% group_by(DeliveryYear) %>%
+  summarise(Yr0 = sum(Education == 0, na.rm = TRUE),
+            Yr1 = sum(Education > 0 & Education < 8, na.rm = TRUE),
+            Yr2 = sum(Education > 7 & Education < 13, na.rm = TRUE),
+            Yr3 = sum(Education > 12, na.rm = TRUE),
+            Missing = sum(is.na(Education))) %>%
+  gather(key = "key", value = "value", Yr0:Missing) %>%
+  filter(!is.na(DeliveryYear)) %>%
+  mutate(key = factor(key, levels = c("Yr0", "Yr1", "Yr2",
+                                      "Yr3", "Missing")))
+
+edu_num <- ggplot(edu_df, aes(x = DeliveryYear, y = value, group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "stack", show.legend = FALSE) +
+  scale_fill_viridis_d(name = "Years",
+                      labels = c("0", "1-7", "8-12", 
+                                 ">12", "Missing")) +
+  ylab("Pregnancies") + xlab("") + 
+  ggtitle("") +
+  theme_pubr() +
+  theme_fig2
+
+edu_per <- ggplot(edu_df, aes(x = DeliveryYear, y = value, group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "fill") +
+  scale_fill_viridis_d(name = "Years",
+                      labels = c("0", "1-7", "8-12", 
+                                 ">12", "Missing")) +
+  ylab("Proportion of Pregnancies") + xlab("") +
+  ggtitle("") +
+  theme_pubr() + theme(legend.position = "bottom") +
+  theme_fig2
+  
+
+# get legend
+edu_leg <- get_legend(edu_per)
+
+# education
+edu_plot <- ggarrange(edu_num, edu_per, legend = "bottom", legend.grob = edu_leg)
+#edu_plot <- annotate_figure(edu_row,
+#                     bottom = text_grob("*Or equivalent per adult basic education and training \n or national qualification framework",
+#                                        hjust = 0, size = 14)) + labs_pubr()
+
+# student
+stu_df <- maindf %>% group_by(DeliveryYear) %>%
+  summarise(No = sum(Scholar == "No", na.rm = TRUE),
+            Yes = sum(Scholar == "Yes", na.rm = TRUE),
+            Missing = sum(is.na(Scholar))) %>%
+  gather(key = "key", value = "value", No:Missing) %>%
+  filter(!is.na(DeliveryYear)) %>%
+  mutate(key = factor(key, levels = c("No", "Yes", "Missing")))
+
+stu_num <- ggplot(stu_df, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "stack", show.legend = FALSE) +
+  scale_fill_viridis_d(name = "") +
+  ylab("Pregnancies") + xlab("") + 
+  ggtitle("") +
+  theme_pubr() +
+  theme_fig2
+
+stu_per <- ggplot(stu_df, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "fill") +
+  scale_fill_viridis_d(name = "Student") +
+  ylab("Proportion of Pregnancies") + xlab("") + 
+  ggtitle("") +
+  theme_pubr() + theme(legend.position = "bottom") +
+  theme_fig2
+
+# get legend
+stu_leg <- get_legend(stu_per)
+
+# student status
+stu_row <- ggarrange(stu_num, stu_per, legend = "bottom", legend.grob = stu_leg)
+stu_plot <- annotate_figure(stu_row) + labs_pubr()
+
+# complications
+com_df <- maindf %>% group_by(DeliveryYear) %>%
+  summarise(Caesarian = sum(Complication == "Caesarian", na.rm = TRUE),
+            Other = sum(Complication == "Other", na.rm = TRUE),
+            None = sum(Complication == "None", na.rm = TRUE),
+            Missing = sum(is.na(Complication))) %>%
+  gather(key = "key", value = "value", Caesarian:Missing) %>%
+  filter(!is.na(DeliveryYear)) %>%
+  mutate(key = factor(key, levels = c("Caesarian", "Other",  
+                                      "None", "Missing")))
+
+com_num <- ggplot(com_df, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "stack", show.legend = FALSE) +
+  scale_fill_viridis_d() +
+  ylab("Pregnancies") + xlab("") +
+  ggtitle("") +
+  theme_pubr() +
+  theme_fig2
+
+com_per <- ggplot(com_df, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "fill") +
+  scale_fill_viridis_d(name = "Type") +
+  ylab("Proportion of Pregnancies") + xlab("") + 
+  ggtitle("") +
+  theme_pubr() + theme(legend.position = "bottom") +
+  theme_fig2
+
+# get legend
+com_leg <- get_legend(com_per)
+
+# att
+com_row <- ggarrange(com_num, com_per, legend = "bottom", legend.grob = com_leg)
+com_plot <- annotate_figure(com_row) + labs_pubr()
+
+# birth outcomes
+out_df <- maindf %>% group_by(DeliveryYear) %>%
+  summarise(`Single Live Birth` = sum(OutCome == "Single Live Birth", na.rm = TRUE),
+            `Multiple Live Born` = sum(OutCome == "Multiple Live Born", na.rm = TRUE),
+            `Multiple Some Stillborn` = sum(OutCome == "Multiple Some Stillborn", na.rm = TRUE),
+            `Single Stillborn` = sum(OutCome == "Single Stillborn", na.rm = TRUE),
+            `Multiple Stillborn` = sum(OutCome == "Multiple Stillborn", na.rm = TRUE),
+            Abortion = sum(OutCome == "Abortion", na.rm = TRUE),
+            Missing = sum(is.na(OutCome))) %>%
+  gather(key = "key", value = "value", `Single Live Birth`:Missing) %>%
+  filter(!is.na(DeliveryYear)) %>%
+  mutate(key = factor(key, levels = c("Single Live Birth", "Multiple Live Born", 
+                                      "Multiple Some Stillborn", 
+                                      "Single Stillborn", "Multiple Stillborn",  
+                                      "Abortion", "Missing")))
+
+out_num <- ggplot(out_df, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "stack", show.legend = FALSE) +
+  scale_fill_viridis_d() +
+  ylab("Pregnancies") + xlab("") + 
+  ggtitle("") +
+  theme_pubr() +
+  theme_fig2
+
+out_per <- ggplot(out_df, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "fill") +
+  scale_fill_viridis_d(name = "Outcome") +
+  ylab("Proportion of Pregnancies") + xlab("") + 
+  ggtitle("") +
+  theme_pubr() + theme(legend.position = "bottom") +
+  theme_fig2
+
+# get legend
+out_leg <- get_legend(out_per)
+
+# out
+out_row <- ggarrange(out_num, out_per, legend = "bottom", legend.grob = out_leg)
+out_plot <- annotate_figure(out_row) + labs_pubr()
+
+# birthweight
+wt_df <- maindf %>% group_by(DeliveryYear) %>%
+  summarise(ELBW = sum(Birthweight < 1 & Birthweight > 0, na.rm = TRUE),
+            VLBW = sum(Birthweight < 1.5 & Birthweight > 1, na.rm = TRUE),
+            LBW = sum(Birthweight < 2.5 & Birthweight > 1.5, na.rm = TRUE),
+            NBW = sum(Birthweight >= 2.5 & Birthweight <= 4, na.rm = TRUE),
+            HBW = sum(Birthweight > 4, na.rm = TRUE),
+            Missing = sum(is.na(Birthweight) | Birthweight == 0)) %>% # lots of zeros are likely missing
+  gather(key = "key", value = "value", ELBW:Missing) %>%
+  filter(!is.na(DeliveryYear)) %>%
+  mutate(key = factor(key, levels = c("ELBW",  
+                                      "VLBW", 
+                                      "LBW", "NBW",
+                                      "HBW",
+                                       "Missing")))
+
+wt_num <- ggplot(wt_df, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "stack", show.legend = FALSE) +
+  scale_fill_viridis_d() +
+  ylab("Pregnancies") + xlab("") + 
+  ggtitle("") +
+  theme_pubr() +
+  theme_fig2
+
+wt_per <- ggplot(wt_df, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "fill") +
+  scale_fill_viridis_d(name = "",
+                       labels = c("Extremely Low Birth Weight",
+                                  "Very Low Birth Weight",
+                                  "Low Birth Weight", 
+                                  "Normal Birth Weight", 
+                                  "High Birth Weight",
+                                  "Missing")) +
+  ylab("Proportion of Pregnancies") + xlab("") + 
+  ggtitle("") +
+  guides(fill = guide_legend(nrow = 2)) +
+  theme_pubr() + theme(legend.position = "bottom") +
+  theme_fig2
+
+# get legend
+wt_leg <- get_legend(wt_per)
+
+# wt
+wt_row <- ggarrange(wt_num, wt_per, legend = "bottom", legend.grob = wt_leg)
+wt_plot <- annotate_figure(wt_row) + labs_pubr()
+```
+
+```{r suppfig1, fig.width=21, fig.height=25}
+supfig1 <- ggarrange(int_plot, pcont_plot, 
+                     age_plot, wt_plot,
+                     edu_plot, stu_plot,
+                     com_plot, out_plot,
+                     ncol = 2, nrow = 4,
+                     labels = c("a. Pregnancy Intention by Delivery Year",
+                                "b. Pre-Pregnancy Contraceptive Use by Delivery Year",
+                                "c. Mother's Age at Delivery by Delivery Year",
+                                "d. Birth Weight by Delivery Year",
+                                "e. Years of Education by Delivery Year",
+                                "f. Student Status During Pregnancy by Delivery Year",
+                                "g. Pregnancy Complications by Delivery Year",
+                                "h. Pregnancy Outcomes by Delivery Year"),
+                    font.label = list(size = 20),
+                    hjust = -0.1, vjust = 1.25)
+
+supfig1
+```
+
+## Supplemental Figure 2: Assessment of Proportional Odds Assumption
+
+```{r supfig2, top = 2, fig.width=8, fig.height=8}
+# check model assumptions for continuous covariates
+# using mean absolute differences for Delivery Year to make it work
+par(mfrow=c(3,4))
+plot.xmean.ordinaly(AntenatalVisits ~ abs(DeliveryYear - 2009) + AgeAtDelivery +
+                          Education + PregnancyNumber + Scholar + PregnancyPlanned +
+                          ContBeMod + Refugee + ResStatus, data = mod1df, topcats = 3,
+                    subn = FALSE, family = "Arial")
+# do not need title on this version
+#title(main = "Supplemental Figure 2. Proportional odds assumption for ordinal antenatal visits model",
+#      cex.main = 1.5,
+#      family = "Arial",
+#      line = -1,
+#      outer = TRUE, adj = 0.1)
+```
+
+## Supplemental Figure 3: Logistic Model Calibration
+
+```{r supfig3, top = 1, fig.width=10, fig.height=5, results="hide"}
+# print calibration plots of model 2 and model 3
+par(mfrow=c(1,2))
+plot(cal2, subtitles = TRUE, legend = FALSE, family = "Arial")
+title(main = list("a. Skilled Birth Attendant",
+                  cex = 1.2), line = 0.2, adj = 0, family = "Arial")
+plot(cal3, subtitles = TRUE, family = "Arial")
+title(main = list("b. Health Facility Delivery",
+                  cex = 1.2), line = 0.2, adj = 0, family = "Arial")
+#title(main = list("Supplemental Figure 3. Logistic model calibration",
+#                  cex = 1.5),
+#      line = -1, family = "Arial",
+#      outer = TRUE, adj = 0.1)
+```
+
+## Supplementary Figure 4: Partial Effects Plot
+
+```{r supfig4, fig.height=9, fig.width=5}
+##### had previously assessed outcomes by year alone ####
+# make datadist for plotting
+dd <- datadist(mod1df)
+options(datadist = 'dd')
+
+pe1 <- ggplot(Predict(mod1, DeliveryYear, fun = med1)) + 
+  labs(title = "", 
+       caption = "") + xlab("") +
+  theme_pubclean() +
+  theme(text = element_text(family = "Arial")) +
+  scale_y_continuous(name = "Predicted Median", 
+                     breaks = seq(0, 8, 2)) +
+  scale_x_continuous(breaks = seq(1994, 2018, 8)) +
+  coord_cartesian(ylim = c(0, 8))
+
+# mod 2
+dd <- datadist(mod2df)
+options(datadist = 'dd')
+
+pe2 <- ggplot(Predict(mod2, DeliveryYear, fun = plogis)) + 
+  labs(title = "",
+       caption = "") + xlab("") +
+  theme_pubclean() +
+  theme(text = element_text(family = "Arial")) +
+  scale_y_continuous(name = "Proportion", 
+                     breaks = seq(0, 1, 0.2)) +
+  scale_x_continuous(breaks = seq(1994, 2018, 8)) +
+  coord_cartesian(ylim = c(0, 1))
+
+# mod 3
+dd <- datadist(mod3df)
+options(datadist = 'dd')
+
+pe3 <- ggplot(Predict(mod3, DeliveryYear, fun = plogis)) + 
+  labs(title = "",
+       caption = "") + 
+  theme_pubclean() +
+  theme(text = element_text(family = "Arial")) +
+  scale_y_continuous(name = "Proportion", 
+                     breaks = seq(0, 1, 0.2)) +
+  scale_x_continuous(breaks = seq(1994, 2018, 8)) +
+  coord_cartesian(ylim = c(0, 1))
+
+fig3 <- ggarrange(pe1, pe2, pe3, ncol = 1,
+                  labels = c("a. Antenatal Visits",
+                             "b. Skilled Birth Attendant",
+                             "c. Deliveries at Health Facility"),
+                  hjust = -0.1)
+#### above code is from previous version ###
+
+#### updated code below shows forest plot of delivery location and partial effects plots by nationality and residency status ####
+pesup4 <- ggarrange(pe3_mig, pe3_res, ncol = 1,
+                    labels = c("b. Nationality",
+                               "c. Residency Status"),
+                    legend = "bottom",
+                    font.label = list(size = 10),
+                    hjust = -0.1)
+supfig4 <- ggarrange(f3, pesup4, ncol = 1, align = "hv")
+supfig4
+```
+
+**Figure Legend**: Supplementary Figure 4 shows the median number of antenatal visits, proportion of deliveries staffed with a skilled birth attendant and at a health facility increased over time from 1993 to 2018.
+
+## Supplemental Figure 5: Sensitivity Analyses Forest Plots
+
+```{r supfig5, fig.height=14, fig.width=7, warning=FALSE}
+# create forest plots of sensitivity analyses for easier visual contrast
+# one figure for each model
+supfig2mod1 <- mod1s %>% rownames_to_column(., "Name") %>%
+  left_join(., mod1sens1 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>% 
+  left_join(., mod1sens2 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod1sens3 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod1sens4 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod1sens5 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  select(-Low, -High, -Diff., -S.E., -Type) %>% 
+  column_to_rownames(., "Name") %>%
+  mutate(cat = factor(c("Age", "Age", "Age",
+                        "CH",
+                        "BYr", "BYr",
+                        "Edu", "Edu",
+                        "PH",
+                        "Int", "Int",
+                        "vs.SA", "vs.SA", 
+                        "vs.Per", "vs.Per",
+                        "St"),
+                 levels = c("Age",
+                            "CH",
+                            "BYr",
+                            "Edu",
+                            "PH",
+                            "Int",
+                            "vs.SA",
+                            "vs.Per",
+                            "St")),
+         name = c("35 vs. 25", "45 vs. 35", "25 vs. 15",
+                  "Hx Contraceptives",
+                  "2004 vs. 1993", "2018 vs. 2004",
+                  "12 vs. 7", "7 vs. 0",
+                  "Pregnancy Hx",
+                  "Other vs. No", "Yes vs. No",
+                  "Moz", "Other", 
+                  "Temp", "Other",
+                  "Student vs. Not")) %>%
+  ggplot(aes(y = name)) +
+  # primary analysis
+  geom_point(aes(x = Effect.x, color = "black")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.x`, xmax = `Upper 0.95.x`, color = "black"), 
+                 height = 0.1) +
+  # sensitivity analysis 1
+  geom_point(aes(x = Effect.y, color = "red")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y`, xmax = `Upper 0.95.y`, color = "red"), 
+                 height = 0.1) +
+  # sensitivity analysis 2
+  geom_point(aes(x = Effect.x.x, color = "blue")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.x.x`, xmax = `Upper 0.95.x.x`, color = "blue"), 
+                 height = 0.1) +
+  # sensitivity analysis 3
+  geom_point(aes(x = Effect.y.y, color = "green")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y.y`, xmax = `Upper 0.95.y.y`, color = "green"), 
+                 height = 0.1) +
+  # sensitivity analysis 4
+  geom_point(aes(x = Effect.x.x.x, color = "purple")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.x.x.x`, xmax = `Upper 0.95.x.x.x`, color = "purple"), 
+                 height = 0.1) +
+  # sensitivity analysis 3
+  geom_point(aes(x = Effect.y.y.y, color = "orange")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y.y.y`, xmax = `Upper 0.95.y.y.y`, color = "orange"), 
+                 height = 0.1) +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  ylab("") + xlab("Adjusted Odds Ratio") +
+  ggtitle("") +
+  facet_grid(cat ~ ., scales = "free", space = "free") +
+  theme_pubr() +
+  theme(text = element_text(family = "Arial")) +
+  scale_color_identity(guide = "legend",
+                       name = "Analysis:",
+                       labels = c("Primary",
+                                  "Sensitivity 1",
+                                  "Sensitivity 2",
+                                  "Sensitivity 3",
+                                  "Sensitivity 4",
+                                  "Sensitivity 5")) +
+  guides(color = guide_legend(nrow = 2)) +
+  scale_x_log10() +
+  theme(legend.position = "bottom")
+
+supfig2mod2 <- mod2s %>% rownames_to_column(., "Name") %>%
+  left_join(., mod2sens1 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>% 
+  left_join(., mod2sens2 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod2sens3 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod2sens4 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod2sens5 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  select(-Low, -High, -Diff., -S.E., -Type) %>% 
+  column_to_rownames(., "Name") %>%
+  mutate(cat = factor(c("Age", "Age", "Age",
+                        "AV", "AV",
+                        "CH",
+                        "BYr", "BYr",
+                        "Edu", "Edu",
+                        "PH",
+                        "Int", "Int",
+                        "vs.SA", "vs.SA", 
+                        "vs.Per", "vs.Per",
+                        "St"),
+                 levels = c("Age",
+                            "AV",
+                            "CH",
+                            "BYr",
+                            "Edu",
+                            "PH",
+                            "Int",
+                            "vs.SA",
+                            "vs.Per",
+                            "St")),
+         name = c("35 vs. 25", "45 vs. 35", "25 vs. 15",
+                  "8 vs. 4", "4 vs. 0",
+                  "Hx Contraceptives",
+                  "2004 vs. 1993", "2018 vs. 2004",
+                  "12 vs. 7", "7 vs. 0",
+                  "Pregnancy Hx",
+                  "Other vs. No", "Yes vs. No",
+                  "Moz", "Other", 
+                  "Temp", "Other",
+                  "Student vs. Not")) %>%
+  ggplot(aes(y = name)) +
+  # primary analysis
+  geom_point(aes(x = Effect.x, color = "black")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.x`, xmax = `Upper 0.95.x`, color = "black"), 
+                 height = 0.1) +
+  # sensitivity analysis 1
+  geom_point(aes(x = Effect.y, color = "red")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y`, xmax = `Upper 0.95.y`, color = "red"), 
+                 height = 0.1) +
+  # sensitivity analysis 2
+  geom_point(aes(x = Effect.x.x, color = "blue")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.x.x`, xmax = `Upper 0.95.x.x`, color = "blue"), 
+                 height = 0.1) +
+  # sensitivity analysis 3
+  geom_point(aes(x = Effect.y.y, color = "green")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y.y`, xmax = `Upper 0.95.y.y`, color = "green"), 
+                 height = 0.1) +
+  # sensitivity analysis 4
+  geom_point(aes(x = Effect.x.x.x, color = "purple")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.x.x.x`, xmax = `Upper 0.95.x.x.x`, color = "purple"), 
+                 height = 0.1) +
+  # sensitivity analysis 3
+  geom_point(aes(x = Effect.y.y.y, color = "orange")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y.y.y`, xmax = `Upper 0.95.y.y.y`, color = "orange"), 
+                 height = 0.1) +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  ylab("") + xlab("Adjusted Odds Ratio") +
+  ggtitle("") +
+  facet_grid(cat ~ ., scales = "free", space = "free") +
+  theme_pubr() +
+  theme(text = element_text(family = "Arial")) +
+  scale_color_identity(guide = "legend",
+                       name = "Analysis:",
+                       labels = c("Primary",
+                                  "Sensitivity 1",
+                                  "Sensitivity 2",
+                                  "Sensitivity 3",
+                                  "Sensitivity 4",
+                                  "Sensitivity 5")) +
+  scale_x_log10() +
+  guides(color = guide_legend(nrow = 2)) +
+  theme(legend.position = "bottom")
+
+supfig2mod3 <- mod3s %>% rownames_to_column(., "Name") %>%
+  left_join(., mod3sens1 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>% 
+  left_join(., mod3sens2 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod3sens3 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod3sens4 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod3sens5 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  select(-Low, -High, -Diff., -S.E., -Type) %>% 
+  column_to_rownames(., "Name") %>%
+  mutate(cat = factor(c("Age", "Age", "Age",
+                        "AV", "AV",
+                        "CH",
+                        "BYr", "BYr",
+                        "Edu", "Edu",
+                        "PH",
+                        "Int", "Int",
+                        "vs.SA", "vs.SA", 
+                        "vs.Per", "vs.Per",
+                        "St"),
+                 levels = c("Age",
+                            "AV",
+                            "CH",
+                            "BYr",
+                            "Edu",
+                            "PH",
+                            "Int",
+                            "vs.SA",
+                            "vs.Per",
+                            "St")),
+         name = c("35 vs. 25", "45 vs. 35", "25 vs. 15",
+                  "8 vs. 4", "4 vs. 0",
+                  "Hx Contraceptives",
+                  "2004 vs. 1993", "2018 vs. 2004",
+                  "12 vs. 7", "7 vs. 0",
+                  "Pregnancy Hx",
+                  "Other vs. No", "Yes vs. No",
+                  "Moz", "Other", 
+                  "Temp", "Other",
+                  "Student vs. Not")) %>%
+  ggplot(aes(y = name)) +
+  # primary analysis
+  geom_point(aes(x = Effect.x, color = "black")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.x`, xmax = `Upper 0.95.x`, color = "black"), 
+                 height = 0.1) +
+  # sensitivity analysis 1
+  geom_point(aes(x = Effect.y, color = "red")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y`, xmax = `Upper 0.95.y`, color = "red"), 
+                 height = 0.1) +
+  # sensitivity analysis 2
+  geom_point(aes(x = Effect.x.x, color = "blue")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.x.x`, xmax = `Upper 0.95.x.x`, color = "blue"), 
+                 height = 0.1) +
+  # sensitivity analysis 3
+  geom_point(aes(x = Effect.y.y, color = "green")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y.y`, xmax = `Upper 0.95.y.y`, color = "green"), 
+                 height = 0.1) +
+  # sensitivity analysis 4
+  geom_point(aes(x = Effect.x.x.x, color = "purple")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.x.x.x`, xmax = `Upper 0.95.x.x.x`, color = "purple"), 
+                 height = 0.1) +
+  # sensitivity analysis 3
+  geom_point(aes(x = Effect.y.y.y, color = "orange")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y.y.y`, xmax = `Upper 0.95.y.y.y`, color = "orange"), 
+                 height = 0.1) +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  ylab("") + xlab("Adjusted Odds Ratio") +
+  ggtitle("") +
+  facet_grid(cat ~ ., scales = "free", space = "free") +
+  theme_pubr() +
+  theme(text = element_text(family = "Arial")) +
+  scale_color_identity(guide = "legend",
+                       name = "Analysis:",
+                       labels = c("Primary",
+                                  "Sensitivity 1",
+                                  "Sensitivity 2",
+                                  "Sensitivity 3",
+                                  "Sensitivity 4",
+                                  "Sensitivity 5")) +
+  scale_x_log10() +
+  guides(color = guide_legend(nrow = 2)) +
+  theme(legend.position = "bottom")
+
+supfig2 <- ggarrange(supfig2mod1, supfig2mod2, supfig2mod3, ncol = 1,
+                     common.legend = TRUE, legend = "bottom",
+                     labels = c("a. Antenatal Visit Sensitivity Analyses",
+                                "b. Skilled Birth Attendant Sensitivity Analyses",
+                                "c. Health Facility Delivery Sensitivity Analyses"),
+                     hjust = -0.2)
+supfig2
+```
+
+## Supplemental Tables
+
+### Supplemental Table 5
+
+```{r suptab5}
+# easier to create tables in a reproducible way than copy and pasting from html output
+mod1tab <- mod1s %>% 
+  mutate(Mod1 = paste0(round(Effect, 2), 
+                       " (", round(`Lower 0.95`, 2), 
+                       ", ", round(`Upper 0.95`, 2), ")")) %>%
+  select(Mod1)
+mod2tab <- mod2s %>% 
+  mutate(Mod2 = paste0(round(Effect, 2), 
+                       " (", round(`Lower 0.95`, 2), 
+                       ", ", round(`Upper 0.95`, 2), ")")) %>%
+  select(Mod2)
+mod3tab <- mod3s %>% 
+  mutate(Mod3 = paste0(round(Effect, 2), 
+                       " (", round(`Lower 0.95`, 2), 
+                       ", ", round(`Upper 0.95`, 2), ")")) %>%
+  select(Mod3)
+
+# add two rows to mod1tab
+mod1sup5 <- mod1tab %>%
+  add_row(Mod1 = NA, .after = 3) %>%
+  add_row(Mod1 = NA, .after = 3)
+
+# give appropriate rownames
+rownames(mod1sup5) <- rownames(mod2tab)
+
+# combine
+write.csv(cbind(mod1sup5, mod2tab, mod3tab), "./tabs/suptab5.csv", row.names = TRUE)
+```
+
+### Supplemental Tables 7-9
+
+```{r suptab7_9}
+# easier to create tables in a reproducible way than copy and pasting from html output
+# suptab7
+mod1s1tab <- mod1sens1 %>% 
+  mutate(Mod1s1 = paste0(round(Effect, 2), 
+                       " (", round(`Lower 0.95`, 2), 
+                       ", ", round(`Upper 0.95`, 2), ")")) %>%
+  select(Mod1s1)
+mod1s2tab <- mod1sens2 %>% 
+  mutate(Mod1s2 = paste0(round(Effect, 2), 
+                       " (", round(`Lower 0.95`, 2), 
+                       ", ", round(`Upper 0.95`, 2), ")")) %>%
+  select(Mod1s2)
+mod1s3tab <- mod1sens3 %>% 
+  mutate(Mod1s3 = paste0(round(Effect, 2), 
+                       " (", round(`Lower 0.95`, 2), 
+                       ", ", round(`Upper 0.95`, 2), ")")) %>%
+  select(Mod1s3)
+mod1s4tab <- mod1sens4 %>% 
+  mutate(Mod1s4 = paste0(round(Effect, 2), 
+                       " (", round(`Lower 0.95`, 2), 
+                       ", ", round(`Upper 0.95`, 2), ")")) %>%
+  select(Mod1s4) %>% add_row(Mod1s4 = NA, .after = 8)
+mod1s5tab <- mod1sens5 %>% 
+  mutate(Mod1s5 = paste0(round(Effect, 2), 
+                       " (", round(`Lower 0.95`, 2), 
+                       ", ", round(`Upper 0.95`, 2), ")")) %>%
+  select(Mod1s5) %>% add_row(Mod1s5 = NA, .after = 8)
+
+# need to update rownames
+rownames(mod1s4tab) <- rownames(mod1tab)
+rownames(mod1s5tab) <- rownames(mod1tab)
+
+write.csv(cbind(mod1tab, mod1s1tab, mod1s2tab, mod1s3tab, mod1s4tab, mod1s5tab), 
+          "./tabs/suptab7.csv", row.names = TRUE)
+
+# suptab8
+mod2s1tab <- mod2sens1 %>% 
+  mutate(Mod2s1 = paste0(round(Effect, 2), 
+                       " (", round(`Lower 0.95`, 2), 
+                       ", ", round(`Upper 0.95`, 2), ")")) %>%
+  select(Mod2s1)
+mod2s2tab <- mod2sens2 %>% 
+  mutate(Mod2s2 = paste0(round(Effect, 2), 
+                       " (", round(`Lower 0.95`, 2), 
+                       ", ", round(`Upper 0.95`, 2), ")")) %>%
+  select(Mod2s2)
+mod2s3tab <- mod2sens3 %>% 
+  mutate(Mod2s3 = paste0(round(Effect, 2), 
+                       " (", round(`Lower 0.95`, 2), 
+                       ", ", round(`Upper 0.95`, 2), ")")) %>%
+  select(Mod2s3)
+mod2s4tab <- mod2sens4 %>% 
+  mutate(Mod2s4 = paste0(round(Effect, 2), 
+                       " (", round(`Lower 0.95`, 2), 
+                       ", ", round(`Upper 0.95`, 2), ")")) %>%
+  select(Mod2s4) %>% add_row(Mod2s4 = NA, .after = 10)
+mod2s5tab <- mod2sens5 %>% 
+  mutate(Mod2s5 = paste0(round(Effect, 2), 
+                       " (", round(`Lower 0.95`, 2), 
+                       ", ", round(`Upper 0.95`, 2), ")")) %>%
+  select(Mod2s5) %>% add_row(Mod2s5 = NA, .after = 10)
+
+# need to update rownames
+rownames(mod2s4tab) <- rownames(mod2tab)
+rownames(mod2s5tab) <- rownames(mod2tab)
+
+write.csv(cbind(mod2tab, mod2s1tab, mod2s2tab, mod2s3tab, mod2s4tab, mod2s5tab), 
+          "./tabs/suptab8.csv", row.names = TRUE)
+
+# suptab9
+mod3s1tab <- mod3sens1 %>% 
+  mutate(Mod3s1 = paste0(round(Effect, 2), 
+                       " (", round(`Lower 0.95`, 2), 
+                       ", ", round(`Upper 0.95`, 2), ")")) %>%
+  select(Mod3s1)
+mod3s2tab <- mod3sens2 %>% 
+  mutate(Mod3s2 = paste0(round(Effect, 2), 
+                       " (", round(`Lower 0.95`, 2), 
+                       ", ", round(`Upper 0.95`, 2), ")")) %>%
+  select(Mod3s2)
+mod3s3tab <- mod3sens3 %>% 
+  mutate(Mod3s3 = paste0(round(Effect, 2), 
+                       " (", round(`Lower 0.95`, 2), 
+                       ", ", round(`Upper 0.95`, 2), ")")) %>%
+  select(Mod3s3)
+mod3s4tab <- mod3sens4 %>% 
+  mutate(Mod3s4 = paste0(round(Effect, 2), 
+                       " (", round(`Lower 0.95`, 2), 
+                       ", ", round(`Upper 0.95`, 2), ")")) %>%
+  select(Mod3s4) %>% add_row(Mod3s4 = NA, .after = 10)
+mod3s5tab <- mod3sens5 %>% 
+  mutate(Mod3s5 = paste0(round(Effect, 2), 
+                       " (", round(`Lower 0.95`, 2), 
+                       ", ", round(`Upper 0.95`, 2), ")")) %>%
+  select(Mod3s5) %>% add_row(Mod3s5 = NA, .after = 10)
+
+# need to update rownames
+rownames(mod3s4tab) <- rownames(mod3tab)
+rownames(mod3s5tab) <- rownames(mod3tab)
+
+write.csv(cbind(mod3tab, mod3s1tab, mod3s2tab, mod3s3tab, mod3s4tab, mod3s5tab), 
+          "./tabs/suptab9.csv", row.names = TRUE)
+```

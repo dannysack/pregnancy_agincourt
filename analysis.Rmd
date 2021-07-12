@@ -1,0 +1,3108 @@
+---
+title: "Full Analysis"
+author: "Danny Sack<br><small>Division of Epidemiology<br>Vanderbilt University School of Medicine</small>"
+date: "<small>`r Sys.Date()`</small>"
+output:
+  rmdformats::readthedown:
+    code_folding: hide
+    lightbox: true
+description: "Full Analysis"
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(rms)
+library(kableExtra)
+library(cowplot)
+library(visdat)
+library(DiagrammeR)
+library(metafor)
+knitrSet(lang='markdown', fig.path='png/', fig.align='center', w=8, h=5, cache=TRUE)
+options(prType='html')
+# load dataset
+Load(deidentified)
+```
+
+# Removing Impossible/Abnormal Values
+
+Prior to starting the analysis, we will need to remove impossible values. As these most frequently occur with continuous variables, we can start by examining all of them in more detail:
+
+```{r desc}
+html(describe(deidentified %>% select(DeliveryYear, ObservationYear, ObsToDelivery, AgeAtDelivery, AntenatalVisits)))
+```
+
+Since all observations are between `1992` and `2020`, I will start by making the Delivery Month and Year `NA` if it occurs before `1991` (n = `r sum(deidentified$DeliveryYear < 1991, na.rm = TRUE)`) or after `2020` (n = `r sum(deidentified$DeliveryYear > 2020, na.rm = TRUE)`), since these are most likely transcription errors.
+
+Based on guidance from Ryan, I have also made all ages less than `11` (n = `r sum(deidentified$AgeAtDelivery < 11, na.rm = TRUE)`) and greater than `55` (n = `r sum(deidentified$AgeAtDelivery > 55, na.rm = TRUE)`) `NA` since they are also likely transcription errors.
+
+I also assumed that more than `15` antenatal visits (n = `r sum(deidentified$AntenatalVisits > 15, na.rm = TRUE)`) was a transcription error and set them to `NA`.
+
+```{r}
+# delivery dates should be between 1991 and 2020
+deidentified$DeliveryYear[deidentified$DeliveryYear < 1991] <- NA
+deidentified$DeliveryYear[deidentified$DeliveryYear > 2020] <- NA
+deidentified$DeliveryMonth[deidentified$DeliveryYear < 1991] <- NA
+deidentified$DeliveryMonth[deidentified$DeliveryYear > 2020] <- NA
+
+# now make ages NA if < 11 or > 55
+deidentified$AgeAtDelivery[deidentified$AgeAtDelivery < 11] <- NA
+deidentified$AgeAtDelivery[deidentified$AgeAtDelivery > 55] <- NA
+
+# make number of antenatal visits NA if > 12
+deidentified$AntenatalVisits[deidentified$AntenatalVisits > 15] <- NA
+```
+
+## Other decision points
+
+1)  Should we delete all births in `1991` (n = `r sum(deidentified$DeliveryYear == 1991, na.rm = TRUE)`) and `2020` (n = `r sum(deidentified$DeliveryYear == 2020, na.rm = TRUE)`), since it seems like the number of births reported in those years are incomplete?
+
+-   We will delete all births in `1991` (n = `r sum(deidentified$DeliveryYear == 1991, na.rm = TRUE)`) and `1992` (n = `r sum(deidentified$DeliveryYear == 1992, na.rm = TRUE)`) because data collection only started in `1992`/`1993` and we are unsure how reliable births collected before `1993` are. We will also delete all births in in `2019` (n = `r sum(deidentified$DeliveryYear == 2019, na.rm = TRUE)`) and `2020` (n = `r sum(deidentified$DeliveryYear == 2020, na.rm = TRUE)`) because data collection generally occurs between August and December, which means that the `2019` data may not have been complete when we received these data, which means the `2020` data are definitely not complete.
+
+2)  Should we delete all births with unknown delivery dates (n = `r sum(is.na(deidentified$DeliveryYear))`)?
+
+-   We will deleted these `r sum(is.na(deidentified$DeliveryYear))` births.
+
+```{r yrs}
+# remove impossible years and missing years
+deidentified <- deidentified %>% filter(DeliveryYear > 1992 & DeliveryYear < 2019 & !is.na(DeliveryYear))
+```
+
+3)  There seem to be a few cases where more than one birth are reported for the same woman (by `Id`) in the same year (n = `r sum(duplicated(deidentified %>% select(Id, DeliveryYear, OutCome)))`), so they key question is whether or not at that point they are twins or triplets that just happen to be recorded as sepearate pregnancies? There seem to be some cases where both the `Id` and `Pregnancy` are the same in the same year (n = `r sum(duplicated(deidentified %>% select(Id, Pregnancy, DeliveryYear)))`). In both cases, it should be relatively easy to just remove the second+ instance.
+
+-   We removed duplicated based births with the same `Outcome` from the same woman in the same `Delivery Year` (n = `r sum(duplicated(deidentified %>% select(Id, DeliveryYear, OutCome)))`).
+
+```{r dup}
+# to remove duplicate pregnancies (gets rid of both instances described above)
+deidentified <- deidentified %>% distinct(Id, DeliveryYear, OutCome, .keep_all = TRUE)
+
+# now need to renumber pregnancies
+deidentified <- deidentified[order(deidentified$DeliveryMonth),]
+deidentified$PregnancyNumber <- ave(as.numeric(deidentified$DeliveryMonth - as.Date("1990-01-01")),
+                               deidentified$Id, FUN = seq_along)
+```
+
+4)  There also seem to be some cases where the observation to delivery time is either negative, or greater than one year. I suspect that these are likely due to transcription errors and that it would be reasonable to make the delivery date missing for cases where the difference is greater than `0` days and less than `730.5` days (two years) to allow for births in individuals who may have been missed one year and found another year. The question is whether we should make these missing or just exclude these participants (n = `r sum(deidentified$ObsToDelivery < 1 | deidentified$ObsToDelivery > 730.5, na.rm = TRUE)`)?
+
+-   We decided to removed cases where the `Delivery Date` was reported as on the same day or after the `Observation Date` (n = `r sum(deidentified$ObsToDelivery < 1, na.rm = TRUE)`) and deal with the longer times with sensitivity analyses.
+
+```{r impossible}
+# remove cases where delivery data is after the observation date
+deidentified <- deidentified %>% filter(ObsToDelivery > 0)
+```
+
+5)  In examining missingness in `AntenatalVisits` versus `AntenatalClinic`, which is a yes/no question to whether or not someone utilized antenatal visits during pregnancy (Yes = `r sum(deidentified$AntenatalClinic == "Yes", na.rm = TRUE)`, No = `r sum(deidentified$AntenatalClinic == "No", na.rm = TRUE)`, Missing = `r sum(is.na(deidentified$AntenatalClinic))`), there seem to be `r nrow(deidentified[deidentified$AntenatalClinic == "No" & is.na(deidentified$AntenatalVisits), ])` cases where an individual reports no antenatal care visits, but a missing number of antenatal care visits. It seems we can safely assume that this number should be `0`. That leaves `r nrow(deidentified[deidentified$AntenatalClinic == "Yes" & is.na(deidentified$AntenatalVisits), ])` cases where an individual reports that they did attend antenatal care visits, but a missing number of visits. Finally, there are `r nrow(deidentified[is.na(deidentified$AntenatalClinic) & is.na(deidentified$AntenatalVisits), ])` cases where both are missing.
+
+-   We have filled in `0` in cases where `AntenatalClinic` is `No` and `AntenatalVisits` is `NA`.
+
+```{r ant_miss}
+# replace "No" with 0 for number of antenatal visits
+deidentified$AntenatalVisits[deidentified$AntenatalClinic == "No" & is.na(deidentified$AntenatalVisits)] <- 0
+```
+
+## Flow Chart
+
+```{r flow}
+# get numbers for sensitivity analysis
+# nrow(deidentified %>% filter(ObsToDelivery < 182.5)) # 6 months
+# nrow(deidentified %>% filter(ObsToDelivery < 730.5)) # 2 years
+# nrow(deidentified %>% filter(OutCome == "Single Live Birth"))
+# nrow(deidentified %>% filter(PregnancyNumber == 1))
+# nrow(deidentified %>% filter(PregnancyNumber == 1 & OutCome == "Single Live Birth"))
+
+grViz("digraph flowchart {
+      # main nodes
+      node [fontname = Arial, shape = rectangle, penwidth = 2]        
+      all [label = 'Agincourt Database pregnancies\\nthrough October 2020 (n = 54,687)']
+      fin [label = 'Pregnancies eligible for analysis\\n(n = 51,355)']
+      exc [label = 'Excluded pregnancies\\n(n = 3,332)']
+      mod1 [label = 'Antenatal Vists\\n(n = 42,878)']
+      mod1sens1 [label = '(n = 17,779)']
+      mod1sens2 [label = '(n = 40,277)']
+      mod1sens3 [label = '(n = 41,747)']
+      mod1sens4 [label = '(n = 28,901)']
+      mod1sens5 [label = '(n = 28,176)']
+      mod2 [label = 'Skilled Birth Attendant\\n(n = 48,646)']
+      mod2sens1 [label = '(n = 19,239)']
+      mod2sens2 [label = '(n = 45,592)']
+      mod2sens3 [label = '(n = 47,526)']
+      mod2sens4 [label = '(n = 33,723)']
+      mod2sens5 [label = '(n = 33,000)']
+      mod3 [label = 'Health Facility Delivery\\n(n = 50,956)']
+      mod3sens1 [label = '(n = 20,275)']
+      mod3sens2 [label = '(n = 47,787)']
+      mod3sens3 [label = '(n = 49,756)']
+      mod3sens4 [label = '(n = 35,749)']
+      mod3sens5 [label = '(n = 34,960)']
+      primexc [label = 'Missing birth year (n = 53) \\n 1991 births (n = 16) \\n 1992 births (n = 934) \\n 2019 births (n = 1,498) \\n 2020 births (n = 22) \\n Duplicate births (n = 685) \\n Delivery date on or after observation date (n = 124)']
+      sens [label = 'Sensitivity Analyses']
+      sens1 [label = 'Births < 6 months before observation date\\n(n = 20,406)']
+      sens2 [label = 'Births < 2 years before observation date\\n(n = 48,124)']
+      sens3 [label = 'Full singleton births\\n(n = 50,138)']
+      sens4 [label = 'First recorded births\\n(n = 36,008)']
+      sens5 [label = 'Full singleton first recorded births\\n(n = 35,207)']
+      
+      # dummy nodes
+      node [shape=none, width=0, height=0, label='']
+      n1
+
+      # edge definitions with the node IDs
+      n1 -> fin
+      fin -> mod1
+      fin -> mod2
+      fin -> mod3
+      {rank = same; n1 -> exc -> primexc}
+      {rank = same; mod1; mod2; mod3; sens}
+      
+      edge[dir = none]
+      all -> n1
+      sens -> sens1 -> sens2 -> sens3 -> sens4 -> sens5
+      mod1 -> mod1sens1 -> mod1sens2 -> mod1sens3 -> mod1sens4 -> mod1sens5
+      mod2 -> mod2sens1 -> mod2sens2 -> mod2sens3 -> mod2sens4 -> mod2sens5
+      mod3 -> mod3sens1 -> mod3sens2 -> mod3sens3 -> mod3sens4 -> mod3sens5
+      {rank = same; sens1; mod1sens1; mod2sens1; mod3sens1}
+      {rank = same; sens2; mod1sens2; mod2sens2; mod3sens2}
+      {rank = same; sens3; mod1sens3; mod2sens3; mod3sens3}
+      {rank = same; sens4; mod1sens4; mod2sens4; mod3sens4}
+      {rank = same; sens5; mod1sens5; mod2sens5; mod3sens5}
+      }
+      ")
+```
+
+## Missingness
+
+After making these adjustments we can also examine missingness by pregnancy, understanding that the observations (rows) are sorted by observation date. We can also examine missingness by variable.
+
+```{r miss}
+# visualize missingness
+vis_miss(deidentified, warn_large_data = FALSE)
+naplot(naclus(deidentified), which = "na per var")
+```
+
+# Descriptive Data by Delivery Year
+
+```{r tab1}
+# adding these for later needs
+mod_cont <- c("Condom", "Emergency Contraceptive", "Injection", "Loop", 
+              ">1 Type", "Pill", "Sterilisation")
+
+# using modern contraceptives before pregnancy
+deidentified$ContBeMod <- NA
+deidentified$ContBeMod[deidentified$ContraceBe %in% mod_cont] <- 1
+deidentified$ContBeMod[deidentified$ContraceBe %nin% mod_cont & !is.na(deidentified$ContraceBe)] <- 0
+label(deidentified$ContBeMod) <- "Modern Contraceptive Use Before Pregnancy"
+
+# using modern contraceptives after pregnancy
+deidentified$ContAfMod <- NA
+deidentified$ContAfMod[deidentified$ContraceAf %in% mod_cont] <- 1
+deidentified$ContAfMod[deidentified$ContraceAf %nin% mod_cont & !is.na(deidentified$ContraceAf)] <- 0
+label(deidentified$ContAfMod) <- "Using or Indended Modern Contraceptive Use After Pregnancy"
+
+# delivery at a health facility, dichotomous
+mod_loc <- c("Hospital", "Clinic", "Health Centre")
+deidentified$DeliveryHealth <- NA
+deidentified$DeliveryHealth[deidentified$DeliveryPlace %in% mod_loc] <- 1
+deidentified$DeliveryHealth[deidentified$DeliveryPlace %nin% mod_loc & !is.na(deidentified$DeliveryPlace)] <- 0
+label(deidentified$DeliveryHealth) <- "Delivery at Health Facility"
+
+# delivery with a skilled birth attendant, dichotomous
+mod_att <- c("Nurse", "Midwife", "Doctor")
+deidentified$ModAtt <- NA
+deidentified$ModAtt[deidentified$Attendant %in% mod_att] <- 1
+deidentified$ModAtt[deidentified$Attendant %nin% mod_att & !is.na(deidentified$Attendant)] <- 0
+label(deidentified$ModAtt) <- "Skilled Birth Attendant"
+
+# creat table 1
+tab1 <- deidentified %>% group_by(DeliveryYear) %>%
+  summarise(Pregnancies = length(unique(Pregnancy)),
+            `First Time Pregnancies` = sum(PregnancyNumber == 1, na.rm = TRUE),
+            `Age (years)` = paste0(round(median(AgeAtDelivery, na.rm = TRUE), 1), " (", 
+                         round(quantile(AgeAtDelivery, 0.25, na.rm = TRUE), 1), ",",
+                         round(quantile(AgeAtDelivery, 0.75, na.rm = TRUE), 1), ")"),
+            `Missing Age` = sum(is.na(AgeAtDelivery)),
+            `Antenatal Visits` = paste0(round(median(AntenatalVisits, na.rm = TRUE), 1), " (", 
+                         round(quantile(AntenatalVisits, 0.25, na.rm = TRUE), 1), ",",
+                         round(quantile(AntenatalVisits, 0.75, na.rm = TRUE), 1), ")"),
+            `0 - 3 Visits` = sum(AntenatalVisits >= 0 & AntenatalVisits < 4, na.rm = TRUE),
+            `4 - 7 Visits` = sum(AntenatalVisits >= 4 & AntenatalVisits < 8, na.rm = TRUE),
+            `8+ Visits` = sum(AntenatalVisits >= 8, na.rm = TRUE),
+            `Missing Vists` = sum(is.na(AntenatalVisits)),
+            `Years of Education (or Equivalent)` = paste0(round(median(Education, na.rm = TRUE), 1), " (", 
+                         round(quantile(Education, 0.25, na.rm = TRUE), 1), ",",
+                         round(quantile(Education, 0.75, na.rm = TRUE), 1), ")"),
+            `No School` = sum(Education == 0, na.rm = TRUE),
+            `Primary School` = sum(Education > 0 & Education < 8, na.rm = TRUE),
+            `Secondary School` = sum(Education > 7 & Education < 13, na.rm = TRUE),
+            `More than Secondary School` = sum(Education > 12, na.rm = TRUE),
+            `Missing Education` = sum(is.na(Education)),
+            `Current Student` = sum(Scholar == "Yes", na.rm = TRUE),
+            `Intend to/Did Return` = sum(BackToSchool == "Yes" | BackToSchool == "Intend To",
+                                         na.rm = TRUE),
+            `Unintended Pregnancy` = sum(PregnancyPlanned == "No", na.rm = TRUE),
+            `Modern Contraceptive Use Before Pregnancy` = sum(ContBeMod == 1,
+                                                              na.rm = TRUE),
+            `No Contraception ` = sum(ContraceBe == "None", na.rm = TRUE),
+            `Injection ` = sum(ContraceBe == "Injection", na.rm = TRUE),
+            `Pill ` = sum(ContraceBe == "Pill", na.rm = TRUE),
+            `Condom ` = sum(ContraceBe == "Condom", na.rm = TRUE),
+            `Sterilisation ` = sum(ContraceBe == "Sterilisation", na.rm = TRUE),
+            `>1 Type ` = sum(ContraceBe == ">1 Type", na.rm = TRUE),
+            `Traditional ` = sum(ContraceBe == "Traditional", na.rm = TRUE),
+            `Loop ` = sum(ContraceBe == "Loop", na.rm = TRUE),
+            `Abstinence ` = sum(ContraceBe == "Abstinence", na.rm = TRUE),
+            `Missing Contraception ` = sum(is.na(ContraceBe)),
+            `Using or Intending to Use Modern Postpartum Contraception` = sum(ContAfMod == 1,
+                                                                       na.rm = TRUE),
+            `No Contraception` = sum(ContraceAf == "None", na.rm = TRUE),
+            Injection = sum(ContraceAf == "Injection", na.rm = TRUE),
+            Pill = sum(ContraceAf == "Pill", na.rm = TRUE),
+            Condom = sum(ContraceAf == "Condom", na.rm = TRUE),
+            `Emergency Contraceptive` = sum(ContraceAf == "Emergency Contraceptive", 
+                                            na.rm = TRUE),
+            Sterilisation = sum(ContraceAf == "Sterilisation", na.rm = TRUE),
+            `>1 Type` = sum(ContraceAf == ">1 Type", na.rm = TRUE),
+            Traditional = sum(ContraceAf == "Traditional", na.rm = TRUE),
+            Loop = sum(ContraceAf == "Loop", na.rm = TRUE),
+            Abstinence = sum(ContraceAf == "Abstinence", na.rm = TRUE),
+            `Missing Contraception` = sum(is.na(ContraceAf)),
+            `Delivery Location` = rep("", length(unique(DeliveryYear))),
+            Hospital = sum(DeliveryPlace == "Hospital", na.rm = TRUE),
+            Clinic = sum(DeliveryPlace == "Clinic", na.rm = TRUE),
+            `Health Centre` = sum(DeliveryPlace == "Health Centre", na.rm = TRUE),
+            Home = sum(DeliveryPlace == "Home", na.rm = TRUE),
+            `Other Location` = sum(DeliveryPlace == "Other", na.rm = TRUE),
+            `Missing Location` = sum(is.na(DeliveryPlace)),
+            `Birth Attendant` = rep("", length(unique(DeliveryYear))),
+            Doctor = sum(Attendant == "Doctor", na.rm = TRUE),
+            `Midwife` = sum(Attendant == "Midwife", na.rm = TRUE),
+            Nurse = sum(Attendant == "Nurse", na.rm = TRUE),
+            `Family Member` = sum(Attendant == "Family Member", na.rm = TRUE),
+            `Community Member` = sum(Attendant == "Community Member", na.rm = TRUE),
+            Nobody = sum(Attendant == "Nobody", na.rm = TRUE),
+            `Missing Attendant` = sum(is.na(Attendant)),
+            `Birth Complication` = rep("", length(unique(DeliveryYear))),
+            `None ` = sum(Complication == "None", na.rm = TRUE),
+            Caesarian = sum(Complication == "Caesarian", na.rm = TRUE),
+            `Other Complication` = sum(Complication == "Other", na.rm = TRUE),
+            `Missing Complication` = sum(is.na(Complication)),
+            `Birth Outcome` = rep("", length(unique(DeliveryYear))),
+            `Single Live Birth` = sum(OutCome == "Single Live Birth", na.rm = TRUE),
+            `Mutlipe Live Births` = sum(OutCome == "Multiple Live Born", na.rm = TRUE),
+            `Single Stillbirth` = sum(OutCome == "Single Stillborn", na.rm = TRUE),
+            `Multiple Stillbirths` = sum(OutCome == "Multiple Stillborn", na.rm = TRUE),
+            `Multiple, Some Stillborn` = sum(OutCome == "Multiple Some Stillborn", na.rm = TRUE),
+            Abortion = sum(OutCome == "Abortion", na.rm = TRUE),
+            `Missing Outcome` = sum(is.na(OutCome)),
+            `Birthweight (grams)` = paste0(round(median(Birthweight, na.rm = TRUE), 1), " (", 
+                         round(quantile(Birthweight, 0.25, na.rm = TRUE), 1), ",",
+                         round(quantile(Birthweight, 0.75, na.rm = TRUE), 1), ")"),
+            `Missing Birthweight` = sum(is.na(Birthweight)),
+            `Nationality` = rep("", length(unique(DeliveryYear))),
+            `South African` = sum(Refugee == "South African", na.rm = TRUE),
+            `Mozambican` = sum(Refugee == "Mozambican", na.rm = TRUE),
+            `Other Status` = sum(Refugee == "Other", na.rm = TRUE),
+            `Missing Status` = sum(is.na(Refugee)),
+            `Resident Status` = rep("", length(unique(DeliveryYear))),
+            `Permanent Resident` = sum(ResStatus == "Resident", na.rm = TRUE),
+            `Migrant Resident` = sum(ResStatus == "Migrant", na.rm = TRUE),
+            `Other Resident` = sum(ResStatus == "Other", na.rm = TRUE),
+            `Missing Resident Status` = sum(is.na(ResStatus))) %>% 
+  mutate(DeliveryYear = ifelse(!is.na(DeliveryYear), DeliveryYear, "Missing Year")) %>% # filter(DeliveryYear %in% c(2017:2018)) %>%
+  column_to_rownames(var = "DeliveryYear") %>% t()
+
+tab1 %>% kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE, fixed_thead = TRUE) %>%
+  add_indent(c(2, 4, 6:9, 11:15, 17, 20:29, 31:41, 43:48, 
+               50:56, 58:61, 63:69, 71, 73:76, 78:81)) %>%
+  scroll_box(width = "800px", height = "500px")
+
+# save as CSV
+tab1 %>% as.data.frame() %>% write.csv("tab1.csv")
+```
+
+```{r tab1_cat}
+# make table one in five year increments, to ease readability
+tab1_cat <- deidentified %>% 
+  mutate(DeliveryYear_cat = cut(DeliveryYear,
+                                breaks = c(-Inf, 1998, 2003, 2008, 2013, Inf))) %>%
+  group_by(DeliveryYear_cat) %>%
+  summarise(Pregnancies = length(unique(Pregnancy)),
+            `First Time Pregnancies` = paste0(sum(PregnancyNumber == 1, na.rm = TRUE), 
+                                              " (", round((sum(PregnancyNumber == 1, na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Age (years)` = paste0(round(median(AgeAtDelivery, na.rm = TRUE), 1), " (", 
+                         round(quantile(AgeAtDelivery, 0.25, na.rm = TRUE), 1), ",",
+                         round(quantile(AgeAtDelivery, 0.75, na.rm = TRUE), 1), ")"),
+            `Missing Age` = paste0(sum(is.na(AgeAtDelivery)), 
+                                              " (", round((sum(is.na(AgeAtDelivery)) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Antenatal Visits` = paste0(round(median(AntenatalVisits, na.rm = TRUE), 1), " (", 
+                         round(quantile(AntenatalVisits, 0.25, na.rm = TRUE), 1), ",",
+                         round(quantile(AntenatalVisits, 0.75, na.rm = TRUE), 1), ")"),
+            `0 - 3 Visits` = paste0(sum(AntenatalVisits >= 0 & AntenatalVisits < 4, na.rm = TRUE), 
+                                              " (", round((sum(AntenatalVisits >= 0 & AntenatalVisits < 4, na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `4 - 7 Visits` = paste0(sum(AntenatalVisits >= 4 & AntenatalVisits < 8, na.rm = TRUE), 
+                                              " (", round((sum(AntenatalVisits >= 4 & AntenatalVisits < 8, na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `8+ Visits` = paste0(sum(AntenatalVisits >= 8, na.rm = TRUE), 
+                                              " (", round((sum(AntenatalVisits >= 8, na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Missing Vists` = paste0(sum(is.na(AntenatalVisits)), 
+                                              " (", round((sum(is.na(AntenatalVisits)) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Years of Education (or Equivalent)` = paste0(round(median(Education, na.rm = TRUE), 1), " (", 
+                         round(quantile(Education, 0.25, na.rm = TRUE), 1), ",",
+                         round(quantile(Education, 0.75, na.rm = TRUE), 1), ")"),
+            `No School` = paste0(sum(Education == 0, na.rm = TRUE), 
+                                              " (", round((sum(Education == 0, na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Primary School` = paste0(sum(Education > 0 & Education < 8, na.rm = TRUE), 
+                                              " (", round((sum(Education > 0 & Education < 8, na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Secondary School` = paste0(sum(Education > 7 & Education < 13, na.rm = TRUE), 
+                                              " (", round((sum(Education > 7 & Education < 13, na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `More than Secondary School` = paste0(sum(Education > 12, na.rm = TRUE), 
+                                              " (", round((sum(Education > 12, na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Missing Education` = paste0(sum(is.na(Education)), 
+                                              " (", round((sum(is.na(Education)) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Current Student` = paste0(sum(Scholar == "Yes", na.rm = TRUE), 
+                                              " (", round((sum(Scholar == "Yes", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Intend to/Did Return` = paste0(sum(BackToSchool == "Yes" | BackToSchool == "Intend To",
+                                         na.rm = TRUE), 
+                                              " (", round((sum(BackToSchool == "Yes" | BackToSchool == "Intend To",
+                                         na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Unintended Pregnancy` = paste0(sum(PregnancyPlanned == "No", na.rm = TRUE), 
+                                              " (", round((sum(PregnancyPlanned == "No", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Modern Contraceptive Use Before Pregnancy` = paste0(sum(ContBeMod == 1, na.rm = TRUE), 
+                                              " (", round((sum(ContBeMod == 1, na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `No Contraception ` = paste0(sum(ContraceBe == "None", na.rm = TRUE), 
+                                              " (", round((sum(ContraceBe == "None", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Injection ` = paste0(sum(ContraceBe == "Injection", na.rm = TRUE), 
+                                              " (", round((sum(ContraceBe == "Injection", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Pill ` = paste0(sum(ContraceBe == "Pill", na.rm = TRUE), 
+                                              " (", round((sum(ContraceBe == "Pill", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Condom ` = paste0(sum(ContraceBe == "Condom", na.rm = TRUE), 
+                                              " (", round((sum(ContraceBe == "Condom", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Sterilisation ` = paste0(sum(ContraceBe == "Sterilisation", na.rm = TRUE), 
+                                              " (", round((sum(ContraceBe == "Sterilisation", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `>1 Type ` = paste0(sum(ContraceBe == ">1 Type", na.rm = TRUE), 
+                                              " (", round((sum(ContraceBe == ">1 Type", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Traditional ` = paste0(sum(ContraceBe == "Traditional", na.rm = TRUE), 
+                                              " (", round((sum(ContraceBe == "Traditional", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Loop ` = paste0(sum(ContraceBe == "Loop", na.rm = TRUE), 
+                                              " (", round((sum(ContraceBe == "Loop", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Abstinence ` = paste0(sum(ContraceBe == "Abstinence", na.rm = TRUE), 
+                                              " (", round((sum(ContraceBe == "Abstinence", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Missing Contraception ` = paste0(sum(is.na(ContraceBe)), 
+                                              " (", round((sum(is.na(ContraceBe)) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Using or Intending to Use Modern Postpartum Contraception` = paste0(sum(ContAfMod == 1, na.rm = TRUE), 
+                                              " (", round((sum(ContAfMod == 1, na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `No Contraception` = paste0(sum(ContraceAf == "None", na.rm = TRUE), 
+                                              " (", round((sum(ContraceAf == "None", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            Injection = paste0(sum(ContraceAf == "Injection", na.rm = TRUE), 
+                                              " (", round((sum(ContraceAf == "Injection", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            Pill = paste0(sum(ContraceAf == "Pill", na.rm = TRUE), 
+                                              " (", round((sum(ContraceAf == "Pill", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            Condom = paste0(sum(ContraceAf == "Condom", na.rm = TRUE), 
+                                              " (", round((sum(ContraceAf == "Condom", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Emergency Contraceptive` = paste0(sum(ContraceAf == "Emergency Contraceptive", na.rm = TRUE), 
+                                              " (", round((sum(ContraceAf == "Emergency Contraceptive", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            Sterilisation = paste0(sum(ContraceAf == "Sterilisation", na.rm = TRUE), 
+                                              " (", round((sum(ContraceAf == "Sterilisation", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `>1 Type` = paste0(sum(ContraceAf == ">1 Type", na.rm = TRUE), 
+                                              " (", round((sum(ContraceAf == ">1 Type", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            Traditional = paste0(sum(ContraceAf == "Traditional", na.rm = TRUE), 
+                                              " (", round((sum(ContraceAf == "Traditional", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            Loop = paste0(sum(ContraceAf == "Loop", na.rm = TRUE), 
+                                              " (", round((sum(ContraceAf == "Loop", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            Abstinence = paste0(sum(ContraceAf == "Abstinence", na.rm = TRUE), 
+                                              " (", round((sum(ContraceAf == "Abstinence", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Missing Contraception` = paste0(sum(is.na(ContraceAf)), 
+                                              " (", round((sum(is.na(ContraceAf)) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Delivery Location` = rep("", length(unique(DeliveryYear_cat))),
+            Hospital = paste0(sum(DeliveryPlace == "Hospital", na.rm = TRUE), 
+                                              " (", round((sum(DeliveryPlace == "Hospital", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            Clinic = paste0(sum(DeliveryPlace == "Clinic", na.rm = TRUE), 
+                                              " (", round((sum(DeliveryPlace == "Clinic", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Health Centre` = paste0(sum(DeliveryPlace == "Health Centre", na.rm = TRUE), 
+                                              " (", round((sum(DeliveryPlace == "Health Centre", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            Home = paste0(sum(DeliveryPlace == "Home", na.rm = TRUE), 
+                                              " (", round((sum(DeliveryPlace == "Home", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Other Location` = paste0(sum(DeliveryPlace == "Other", na.rm = TRUE), 
+                                              " (", round((sum(DeliveryPlace == "Other", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Missing Location` = paste0(sum(is.na(DeliveryPlace)), 
+                                              " (", round((sum(is.na(DeliveryPlace)) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Birth Attendant` = rep("", length(unique(DeliveryYear_cat))),
+            Doctor = paste0(sum(Attendant == "Doctor", na.rm = TRUE), 
+                                              " (", round((sum(Attendant == "Doctor", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Midwife` = paste0(sum(Attendant == "Midwife", na.rm = TRUE), 
+                                              " (", round((sum(Attendant == "Midwife", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            Nurse = paste0(sum(Attendant == "Nurse", na.rm = TRUE), 
+                                              " (", round((sum(Attendant == "Nurse", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Family Member` = paste0(sum(Attendant == "Family Member", na.rm = TRUE), 
+                                              " (", round((sum(Attendant == "Family Member", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Community Member` = paste0(sum(Attendant == "Community Member", na.rm = TRUE), 
+                                              " (", round((sum(Attendant == "Community Member", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            Nobody = paste0(sum(Attendant == "Nobody", na.rm = TRUE), 
+                                              " (", round((sum(Attendant == "Nobody", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Missing Attendant` = paste0(sum(is.na(Attendant)), 
+                                              " (", round((sum(is.na(Attendant)) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Nationality` = rep("", length(unique(DeliveryYear_cat))),
+            `South African` = paste0(sum(Refugee == "South African", na.rm = TRUE), 
+                                              " (", round((sum(Refugee == "South African", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Mozambican` = paste0(sum(Refugee == "Mozambican", na.rm = TRUE), 
+                                              " (", round((sum(Refugee == "Mozambican", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Other Status` = paste0(sum(Refugee == "Other", na.rm = TRUE), 
+                                              " (", round((sum(Refugee == "Other", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Missing Status` = paste0(sum(is.na(Refugee)), 
+                                              " (", round((sum(is.na(Refugee)) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Residency` = rep("", length(unique(DeliveryYear_cat))),
+            `Permanent Resident` = paste0(sum(ResStatus == "Resident", na.rm = TRUE), 
+                                              " (", round((sum(ResStatus == "Resident", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Migrant` = paste0(sum(ResStatus == "Migrant", na.rm = TRUE), 
+                                              " (", round((sum(ResStatus == "Migrant", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Other Status ` = paste0(sum(ResStatus == "Other", na.rm = TRUE), 
+                                              " (", round((sum(ResStatus == "Other", na.rm = TRUE) / length(unique(Pregnancy))) * 100, 1), ")"),
+            `Missing Status ` = paste0(sum(is.na(ResStatus)), 
+                                              " (", round((sum(is.na(ResStatus)) / length(unique(Pregnancy))) * 100, 1), ")")) %>% 
+  # mutate(DeliveryYear_cat = ifelse(!is.na(DeliveryYear_cat), DeliveryYear_cat, "Missing Year")) %>%  filter(DeliveryYear %in% c(2017:2018)) %>%
+  column_to_rownames(var = "DeliveryYear_cat") %>% t()
+
+# save as a CSV
+tab1_cat %>% as.data.frame() %>% write.csv("tab1_cat.csv")
+```
+
+I will now examine each covariate of interest graphically by year:
+
+## Age
+
+```{r age}
+# Examine age by year
+# create numerical and proportion for each covariate
+# numerical uses position = "stack", proportion uses position = "fill"
+
+# age groups
+age_plot <- deidentified %>% group_by(DeliveryYear) %>%
+  summarise(Age1 = sum(AgeAtDelivery < 15, na.rm = TRUE),
+            Age2 = sum(AgeAtDelivery < 20  & AgeAtDelivery >= 15, na.rm = TRUE),
+            Age3 = sum(AgeAtDelivery < 25 & AgeAtDelivery >= 20, na.rm = TRUE),
+            Age4 = sum(AgeAtDelivery < 30 & AgeAtDelivery >= 25, na.rm = TRUE),
+            Age5 = sum(AgeAtDelivery < 35 & AgeAtDelivery >= 30, na.rm = TRUE),
+            Age6 = sum(AgeAtDelivery < 40 & AgeAtDelivery >= 35, na.rm = TRUE),
+            Age7 = sum(AgeAtDelivery < 45 & AgeAtDelivery >= 40, na.rm = TRUE),
+            Age8 = sum(AgeAtDelivery < 50 & AgeAtDelivery >= 45, na.rm = TRUE),
+            Age9 = sum(AgeAtDelivery >= 50, na.rm = TRUE),
+            Missing = sum(is.na(AgeAtDelivery))) %>% # lots of zeros are likely missing
+  gather(key = "key", value = "value", Age1:Missing) %>%
+  filter(!is.na(DeliveryYear)) %>%
+  mutate(key = factor(key, levels = c("Age1", "Age2", "Age3", "Age4",
+                                      "Age5", "Age6", "Age7", "Age8",
+                                      "Age9",  "Missing")))
+
+age_num <- ggplot(age_plot, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "stack", show.legend = FALSE) +
+  scale_fill_viridis_d() +
+  ylab("Pregnancies") + xlab("") + 
+  theme_bw()
+
+age_per <- ggplot(age_plot, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "fill") +
+  scale_fill_viridis_d(name = "",
+                       labels = c("11-14", "15-19", "20-24", "25-29", 
+                                  "30-34", "35-39", "40-44", "45-49",
+                                  "50-55", "Missing")) +
+  ylab("Proportion of Pregnancies") + xlab("") + 
+  theme_bw() + theme(legend.position = "bottom")
+
+# title
+age_title <- ggdraw() +
+  draw_label("Mother's Age at Delivery by Delivery Year",
+    fontface = 'bold', x = 0, hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 7))
+
+# legend
+age_leg <- cowplot::get_legend(age_per)
+age_per <- age_per + theme(legend.position = "none")
+
+# antenatal visits
+age_row <- plot_grid(age_num, age_per)
+age_plus <- plot_grid(age_row, age_leg, ncol = 1, rel_heights = c(1, 0.2))
+plot_grid(age_title, age_plus, ncol = 1, rel_heights = c(0.1, 1))
+```
+
+## Antenatal Vists
+
+```{r ant_plots}
+# number of antenatal visits
+# Examine by year
+# create numerical and proportion for each covariate
+# numerical uses position = "stack", proportion uses position = "fill"
+ant_plot <- deidentified %>% group_by(DeliveryYear) %>%
+  summarise(Visit0 = sum(AntenatalVisits == 0, na.rm = TRUE),
+            Visit1 = sum(AntenatalVisits == 1, na.rm = TRUE),
+            Visit2 = sum(AntenatalVisits == 2, na.rm = TRUE),
+            Visit3 = sum(AntenatalVisits == 3, na.rm = TRUE),
+            Visit4 = sum(AntenatalVisits == 4, na.rm = TRUE),
+            Visit5 = sum(AntenatalVisits == 5, na.rm = TRUE),
+            Visit6 = sum(AntenatalVisits == 6, na.rm = TRUE),
+            Visit7 = sum(AntenatalVisits == 7, na.rm = TRUE),
+            Visit8 = sum(AntenatalVisits == 8, na.rm = TRUE),
+            Visit9 = sum(AntenatalVisits == 9, na.rm = TRUE),
+            Visit10 = sum(AntenatalVisits == 10, na.rm = TRUE),
+            Visit11 = sum(AntenatalVisits == 11, na.rm = TRUE),
+            Visit12 = sum(AntenatalVisits >= 12, na.rm = TRUE),
+            Missing = sum(is.na(AntenatalVisits))) %>%
+  gather(key = "key", value = "value", Visit0:Missing) %>%
+  filter(!is.na(DeliveryYear)) %>%
+  mutate(key = factor(key, levels = c("Visit0", "Visit1", "Visit2",
+                                      "Visit3", "Visit4", "Visit5",
+                                      "Visit6", "Visit7", "Visit8",
+                                      "Visit9", "Visit10", "Visit11",
+                                      "Visit12", "Missing")))
+
+ant_num <- ggplot(ant_plot, aes(x = DeliveryYear, y = value, group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "stack") +
+  scale_fill_viridis_d(name = "Visits",
+                      labels = c("0", "1", "2", "3", "4",
+                                 "5", "6", "7", "8", "9",
+                                 "10", "11", "12+", "Missing")) +
+  ylab("Pregnancies") + xlab("") + 
+  theme_bw() + theme(legend.position="none")
+
+ant_per <- ggplot(ant_plot, aes(x = DeliveryYear, y = value, group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "fill") +
+  scale_fill_viridis_d(name = "Visits",
+                      labels = c("0", "1", "2", "3", "4",
+                                 "5", "6", "7", "8", "9",
+                                 "10", "11", "12+", "Missing")) +
+  ylab("Proportion of Pregnancies") + xlab("") + 
+  theme_bw() + theme(legend.position = "bottom") + 
+  guides(fill = guide_legend(nrow = 2))
+
+# title
+ant_title <- ggdraw() +
+  draw_label("Antenatal Visits by Delivery Year",
+    fontface = 'bold', x = 0, hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 7))
+
+# legend
+ant_leg <- cowplot::get_legend(ant_per)
+ant_per <- ant_per + theme(legend.position = "none")
+
+# antenatal visits
+ant_row <- plot_grid(ant_num, ant_per)
+ant_plus <- plot_grid(ant_row, ant_leg, ncol = 1, rel_heights = c(1, 0.2))
+plot_grid(ant_title, ant_plus, ncol = 1, rel_heights = c(0.1, 1))
+```
+
+There does, unfortunately, seem to be a high level of missingness in the count of Antenatal visits (n = `r sum(is.na(deidentified$AntenatalVisits))`), particularly in the early years.
+
+## Education
+
+```{r edu_plots}
+# number of years of education
+# Examine by year
+# create numerical and proportion for each covariate
+# numerical uses position = "stack", proportion uses position = "fill"
+edu_plot <- deidentified %>% group_by(DeliveryYear) %>%
+  summarise(Yr0 = sum(Education == 0, na.rm = TRUE),
+            Yr1 = sum(Education == 1, na.rm = TRUE),
+            Yr2 = sum(Education == 2, na.rm = TRUE),
+            Yr3 = sum(Education == 3, na.rm = TRUE),
+            Yr4 = sum(Education == 4, na.rm = TRUE),
+            Yr5 = sum(Education == 5, na.rm = TRUE),
+            Yr6 = sum(Education == 6, na.rm = TRUE),
+            Yr7 = sum(Education == 7, na.rm = TRUE),
+            Yr8 = sum(Education == 8, na.rm = TRUE),
+            Yr9 = sum(Education == 9, na.rm = TRUE),
+            Yr10 = sum(Education == 10, na.rm = TRUE),
+            Yr11 = sum(Education == 11, na.rm = TRUE),
+            Yr12 = sum(Education == 12, na.rm = TRUE),
+            Yr13 = sum(Education == 13, na.rm = TRUE),
+            Yr14 = sum(Education == 14, na.rm = TRUE),
+            Yr15 = sum(Education == 15, na.rm = TRUE),
+            Missing = sum(is.na(Education))) %>%
+  gather(key = "key", value = "value", Yr0:Missing) %>%
+  filter(!is.na(DeliveryYear)) %>%
+  mutate(key = factor(key, levels = c("Yr0", "Yr1", "Yr2",
+                                      "Yr3", "Yr4", "Yr5",
+                                      "Yr6", "Yr7", "Yr8",
+                                      "Yr9", "Yr10", "Yr11",
+                                      "Yr12", "Yr13", "Yr14", 
+                                      "Yr15", "Missing")))
+
+edu_num <- ggplot(edu_plot, aes(x = DeliveryYear, y = value, group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "stack", show.legend = FALSE) +
+  scale_fill_viridis_d(name = "Years",
+                      labels = c("0", "1", "2", "3", "4",
+                                 "5", "6", "7", "8", "9",
+                                 "10", "11", "12", "13",
+                                 "14", "15", "Missing")) +
+  ylab("Pregnancies") + xlab("") + 
+  labs(caption = "") +
+  theme_bw()
+
+edu_per <- ggplot(edu_plot, aes(x = DeliveryYear, y = value, group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "fill") +
+  scale_fill_viridis_d(name = "Years",
+                      labels = c("0", "1", "2", "3", "4",
+                                 "5", "6", "7", "8", "9",
+                                 "10", "11", "12", "13",
+                                 "14", "15", "Missing")) +
+  ylab("Proportion of Pregnancies") + xlab("") + 
+  labs(caption = "*Or equivalent per ABET/NQF") +
+  theme_bw() + theme(legend.position = "bottom") + 
+  guides(fill = guide_legend(nrow = 2))
+
+# title
+edu_title <- ggdraw() +
+  draw_label("Years of Education* by Delivery Year",
+    fontface = 'bold', x = 0, hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 7))
+
+# legend
+edu_leg <- cowplot::get_legend(edu_per)
+edu_per <- edu_per + theme(legend.position = "none")
+
+# antenatal visits
+edu_row <- plot_grid(edu_num, edu_per)
+edu_plus <- plot_grid(edu_row, edu_leg, ncol = 1, rel_heights = c(1, 0.2))
+plot_grid(edu_title, edu_plus, ncol = 1, rel_heights = c(0.1, 1, 0.1))
+```
+
+Again, there are fairly high levels of missingness in this covariate in the early years. Also, for simplicities sake, and the ability to keep `Education` a continuous variable, I have re-categorized responses to the equivalent grade level. For example, completion of grade 9 in South Africa or Mozambique, Adult Basic Education Level 4, and National Qualification Framework Level 1 traning are all coded as `9` since they are all equivalent to 9 years of school.
+
+## Student while Pregnant
+
+```{r sch_plot}
+# student during pregnancy
+# Examine by year
+# create numerical and proportion for each covariate
+# numerical uses position = "stack", proportion uses position = "fill"
+stu_plot <- deidentified %>% group_by(DeliveryYear) %>%
+  summarise(No = sum(Scholar == "No", na.rm = TRUE),
+            Yes = sum(Scholar == "Yes", na.rm = TRUE),
+            Missing = sum(is.na(Scholar))) %>%
+  gather(key = "key", value = "value", No:Missing) %>%
+  filter(!is.na(DeliveryYear)) %>%
+  mutate(key = factor(key, levels = c("No", "Yes", "Missing")))
+
+stu_num <- ggplot(stu_plot, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "stack", show.legend = FALSE) +
+  scale_fill_viridis_d(name = "") +
+  ylab("Pregnancies") + xlab("") + 
+  theme_bw()
+
+stu_per <- ggplot(stu_plot, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "fill") +
+  scale_fill_viridis_d(name = "") +
+  ylab("Proportion of Pregnancies") + xlab("") + 
+  theme_bw() + theme(legend.position = "bottom")
+
+# title
+stu_title <- ggdraw() +
+  draw_label("Student Status During Pregnancy by Delivery Year",
+    fontface = 'bold', x = 0, hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 7))
+
+# legend
+stu_leg <- cowplot::get_legend(stu_per)
+stu_per <- stu_per + theme(legend.position = "none")
+
+# antenatal visits
+stu_row <- plot_grid(stu_num, stu_per)
+stu_plus <- plot_grid(stu_row, stu_leg, ncol = 1, rel_heights = c(1, 0.2))
+plot_grid(stu_title, stu_plus, ncol = 1, rel_heights = c(0.1, 1))
+```
+
+Somewhat reassuringly, there seem to be fewer students as time progresses and there is very little missingness in these data! That said, this plot does not differentiate by age at pregnancy or pregnancy number.
+
+## Pregnancy Intention
+
+```{r int}
+# pregnancy intention
+# Examine by year
+# create numerical and proportion for each covariate
+# numerical uses position = "stack", proportion uses position = "fill"
+int_plot <- deidentified %>% group_by(DeliveryYear) %>%
+  summarise(No = sum(PregnancyPlanned == "No", na.rm = TRUE),
+            Other = sum(PregnancyPlanned == "Other", na.rm = TRUE),
+            Yes = sum(PregnancyPlanned == "Yes", na.rm = TRUE),
+            Missing = sum(is.na(PregnancyPlanned))) %>%
+  gather(key = "key", value = "value", No:Missing) %>%
+  filter(!is.na(DeliveryYear)) %>%
+  mutate(key = factor(key, levels = c("No", "Other", "Yes", "Missing")))
+
+int_num <- ggplot(int_plot, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "stack", show.legend = FALSE) +
+  scale_fill_viridis_d(name = "",
+                       labels = c("Unintended", "Other",
+                                  "Intended", "Missing")) +
+  ylab("Pregnancies") + xlab("") + 
+  theme_bw()
+
+int_per <- ggplot(int_plot, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "fill") +
+  scale_fill_viridis_d(name = "",
+                       labels = c("Unintended", "Other",
+                                  "Intended", "Missing")) +
+  ylab("Proportion of Pregnancies") + xlab("") + 
+  theme_bw() + theme(legend.position = "bottom")
+
+# title
+int_title <- ggdraw() +
+  draw_label("Pregnancy Intention by Delivery Year",
+    fontface = 'bold', x = 0, hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 7))
+
+# legend
+int_leg <- cowplot::get_legend(int_per)
+int_per <- int_per + theme(legend.position = "none")
+
+# antenatal visits
+int_row <- plot_grid(int_num, int_per)
+int_plus <- plot_grid(int_row, int_leg, ncol = 1, rel_heights = c(1, 0.2))
+plot_grid(int_title, int_plus, ncol = 1, rel_heights = c(0.1, 1))
+```
+
+The proportion of unintended pregnancies seems to increase leading up to around 2003, at which point it levels of and starts to fall again. There does seem to be an increase in missingness around 2010, which may impact the trend.
+
+## Contraceptive Use Prior to Pregnancy
+
+```{r pcont}
+# pre-pregnancy contraception
+# Examine by year
+# create numerical and proportion for each covariate
+# numerical uses position = "stack", proportion uses position = "fill"
+pcont_plot <- deidentified %>% group_by(DeliveryYear) %>%
+  summarise(None = sum(ContraceBe == "None", na.rm = TRUE),
+            Injection = sum(ContraceBe == "Injection", na.rm = TRUE),
+            Pill = sum(ContraceBe == "Pill", na.rm = TRUE),
+            Condom = sum(ContraceBe == "Condom", na.rm = TRUE),
+            Sterilisation = sum(ContraceBe == "Sterilisation", na.rm = TRUE),
+            `>1 Type` = sum(ContraceBe == ">1 Type", na.rm = TRUE),
+            Traditional = sum(ContraceBe == "Traditional", na.rm = TRUE),
+            Loop = sum(ContraceBe == "Loop", na.rm = TRUE),
+            Abstinence = sum(ContraceBe == "Abstinence", na.rm = TRUE),
+            Missing = sum(is.na(ContraceBe))) %>%
+  gather(key = "key", value = "value", None:Missing) %>%
+  filter(!is.na(DeliveryYear)) %>%
+  mutate(key = factor(key, levels = c("None", "Injection", "Pill", "Sterilisation",
+                                      "Condom", ">1 Type",
+                                      "Traditional", "Loop", "Abstinence",
+                                      "Missing")))
+
+pcont_num <- ggplot(pcont_plot, aes(x = DeliveryYear, y = value, 
+                                      group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "stack", show.legend = FALSE) +
+  scale_fill_viridis_d() +
+  ylab("Pregnancies") + xlab("") + 
+  theme_bw()
+
+pcont_per <- ggplot(pcont_plot, aes(x = DeliveryYear, y = value, 
+                                      group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "fill") +
+  scale_fill_viridis_d(name = "") +
+  ylab("Proportion of Pregnancies") + xlab("") + 
+  theme_bw() + theme(legend.position = "bottom")
+
+# title
+pcont_title <- ggdraw() +
+  draw_label("Pre-Pregnancy Contraceptive Use by Delivery Year",
+    fontface = 'bold', x = 0, hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 7))
+
+# legend
+pcont_leg <- cowplot::get_legend(pcont_per)
+pcont_per <- pcont_per + theme(legend.position = "none")
+
+# antenatal visits
+pcont_row <- plot_grid(pcont_num, pcont_per)
+pcont_plus <- plot_grid(pcont_row, pcont_leg, ncol = 1, rel_heights = c(1, 0.2))
+plot_grid(pcont_title, pcont_plus, ncol = 1, rel_heights = c(0.1, 1))
+```
+
+There also seems to be a spike in missingness around 2010 in these data and, not surprisingly, injectables seem to be the most common form of pre-pregnancy contraception if a woman happens to be using it.
+
+## Intention/Current Postpartum Contraceptive Use by Delivery Year
+
+```{r ppcont}
+# post-pregnancy contraception
+# Examine by year
+# create numerical and proportion for each covariate
+# numerical uses position = "stack", proportion uses position = "fill"
+ppcont_plot <- deidentified %>% group_by(DeliveryYear) %>%
+  summarise(None = sum(ContraceAf == "None", na.rm = TRUE),
+            Injection = sum(ContraceAf == "Injection", na.rm = TRUE),
+            Pill = sum(ContraceAf == "Pill", na.rm = TRUE),
+            Condom = sum(ContraceAf == "Condom", na.rm = TRUE),
+            `Emergency Contraceptive` = sum(ContraceAf == "Emergency Contraceptive", na.rm = TRUE),
+            Sterilisation = sum(ContraceAf == "Sterilisation", na.rm = TRUE),
+            `>1 Type` = sum(ContraceAf == ">1 Type", na.rm = TRUE),
+            Traditional = sum(ContraceAf == "Traditional", na.rm = TRUE),
+            Loop = sum(ContraceAf == "Loop", na.rm = TRUE),
+            Abstinence = sum(ContraceAf == "Abstinence", na.rm = TRUE),
+            Missing = sum(is.na(ContraceAf))) %>%
+  gather(key = "key", value = "value", None:Missing) %>%
+  filter(!is.na(DeliveryYear)) %>%
+  mutate(key = factor(key, levels = c("None", "Injection", "Pill", "Sterilisation",
+                                      "Condom", "Emergency Contraceptive", ">1 Type",
+                                      "Traditional", "Loop", "Abstinence",
+                                      "Missing")))
+
+ppcont_num <- ggplot(ppcont_plot, aes(x = DeliveryYear, y = value, 
+                                      group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "stack", show.legend = FALSE) +
+  scale_fill_viridis_d() +
+  ylab("Pregnancies") + xlab("") + 
+  theme_bw()
+
+ppcont_per <- ggplot(ppcont_plot, aes(x = DeliveryYear, y = value, 
+                                      group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "fill") +
+  scale_fill_viridis_d(name = "") +
+  ylab("Proportion of Pregnancies") + xlab("") + 
+  theme_bw() + theme(legend.position = "bottom") +
+  guides(fill = guide_legend(nrow = 2))
+
+# title
+ppcont_title <- ggdraw() +
+  draw_label("Intention/Current Postpartum Contraceptive Use by Delivery Year",
+    fontface = 'bold', x = 0, hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 7))
+
+# legend
+ppcont_leg <- cowplot::get_legend(ppcont_per)
+ppcont_per <- ppcont_per + theme(legend.position = "none")
+
+# antenatal visits
+ppcont_row <- plot_grid(ppcont_num, ppcont_per)
+ppcont_plus <- plot_grid(ppcont_row, ppcont_leg, ncol = 1, rel_heights = c(1, 0.2))
+plot_grid(ppcont_title, ppcont_plus, ncol = 1, rel_heights = c(0.1, 1))
+```
+
+There also seems to be increased missing data around 2010 and, again not surprisingly, injectables seem to be the favored postpartum contraceptive in this population.
+
+## Delivery Location
+
+```{r loc}
+# delivery location
+# Examine by year
+# create numerical and proportion for each covariate
+# numerical uses position = "stack", proportion uses position = "fill"
+loc_plot <- deidentified %>% group_by(DeliveryYear) %>%
+  summarise(Hospital = sum(DeliveryPlace == "Hospital", na.rm = TRUE),
+            Clinic = sum(DeliveryPlace == "Clinic", na.rm = TRUE),
+            `Health Centre` = sum(DeliveryPlace == "Health Centre", na.rm = TRUE),
+            Home = sum(DeliveryPlace == "Home", na.rm = TRUE),
+            Other = sum(DeliveryPlace == "Other", na.rm = TRUE),
+            Missing = sum(is.na(DeliveryPlace))) %>%
+  gather(key = "key", value = "value", Hospital:Missing) %>%
+  filter(!is.na(DeliveryYear)) %>%
+  mutate(key = factor(key, levels = c("Hospital", "Clinic", "Health Centre", 
+                                      "Home", "Other",  
+                                      "Missing")))
+
+loc_num <- ggplot(loc_plot, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "stack", show.legend = FALSE) +
+  scale_fill_viridis_d() +
+  ylab("Pregnancies") + xlab("") + 
+  theme_bw()
+
+loc_per <- ggplot(loc_plot, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "fill") +
+  scale_fill_viridis_d(name = "") +
+  ylab("Proportion of Pregnancies") + xlab("") +
+  theme_bw() + theme(legend.position = "bottom")
+
+# title
+loc_title <- ggdraw() +
+  draw_label("Delivery Location by Delivery Year",
+    fontface = 'bold', x = 0, hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 7))
+
+# legend
+loc_leg <- cowplot::get_legend(loc_per)
+loc_per <- loc_per + theme(legend.position = "none")
+
+# antenatal visits
+loc_row <- plot_grid(loc_num, loc_per)
+loc_plus <- plot_grid(loc_row, loc_leg, ncol = 1, rel_heights = c(1, 0.2))
+plot_grid(loc_title, loc_plus, ncol = 1, rel_heights = c(0.1, 1))
+```
+
+These data appear very complete and there does seem to be a reduction in home births over time, accompanied by increased births in hospitals.
+
+## Birth Attendant
+
+```{r att}
+# delivery attendant
+# Examine by year
+# create numerical and proportion for each covariate
+# numerical uses position = "stack", proportion uses position = "fill"
+att_plot <- deidentified %>% group_by(DeliveryYear) %>%
+  summarise(Nurse = sum(Attendant == "Nurse", na.rm = TRUE),
+            Midwife = sum(Attendant == "Midwife", na.rm = TRUE),
+            Doctor = sum(Attendant == "Doctor", na.rm = TRUE),
+            `Family Member` = sum(Attendant == "Family Member", na.rm = TRUE),
+            Nobody = sum(Attendant == "Nobody", na.rm = TRUE),
+            `Community Member` = sum(Attendant == "Community Member", na.rm = TRUE),
+            Other = sum(Attendant == "Other", na.rm = TRUE),
+            Missing = sum(is.na(Attendant))) %>%
+  gather(key = "key", value = "value", Nurse:Missing) %>%
+  filter(!is.na(DeliveryYear)) %>%
+  mutate(key = factor(key, levels = c("Doctor", "Midwife", "Nurse",   
+                                      "Family Member", "Community Member", 
+                                      "Other", "Nobody", "Missing")))
+
+att_num <- ggplot(att_plot, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "stack", show.legend = FALSE) +
+  scale_fill_viridis_d() +
+  ylab("Pregnancies") + xlab("") + 
+  theme_bw()
+
+att_per <- ggplot(att_plot, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "fill") +
+  scale_fill_viridis_d(name = "") +
+  ylab("Proportion of Pregnancies") + xlab("") +
+  theme_bw() + theme(legend.position = "bottom")
+
+# title
+att_title <- ggdraw() +
+  draw_label("Delivery Attendant by Delivery Year",
+    fontface = 'bold', x = 0, hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 7))
+
+# legend
+att_leg <- cowplot::get_legend(att_per)
+att_per <- att_per + theme(legend.position = "none")
+
+# antenatal visits
+att_row <- plot_grid(att_num, att_per)
+att_plus <- plot_grid(att_row, att_leg, ncol = 1, rel_heights = c(1, 0.2))
+plot_grid(att_title, att_plus, ncol = 1, rel_heights = c(0.1, 1))
+```
+
+While there are some missing data initially, from 1992 or 1993 these data appear very complete with more women having a allopathic medicine birth attendant over time.
+
+## Delivery Complications
+
+```{r comp}
+# complications
+# Examine by year
+# create numerical and proportion for each covariate
+# numerical uses position = "stack", proportion uses position = "fill"
+com_plot <- deidentified %>% group_by(DeliveryYear) %>%
+  summarise(Caesarian = sum(Complication == "Caesarian", na.rm = TRUE),
+            Other = sum(Complication == "Other", na.rm = TRUE),
+            None = sum(Complication == "None", na.rm = TRUE),
+            Missing = sum(is.na(Complication))) %>%
+  gather(key = "key", value = "value", Caesarian:Missing) %>%
+  filter(!is.na(DeliveryYear)) %>%
+  mutate(key = factor(key, levels = c("Caesarian", "Other",  
+                                      "None", "Missing")))
+
+com_num <- ggplot(com_plot, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "stack", show.legend = FALSE) +
+  scale_fill_viridis_d() +
+  ylab("Pregnancies") + xlab("") +
+  theme_bw()
+
+com_per <- ggplot(com_plot, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "fill") +
+  scale_fill_viridis_d(name = "") +
+  ylab("Proportion of Pregnancies") + xlab("") + 
+  theme_bw() + theme(legend.position = "bottom")
+
+# title
+com_title <- ggdraw() +
+  draw_label("Pregnancy Complications by Delivery Year",
+    fontface = 'bold', x = 0, hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 7))
+
+# legend
+com_leg <- cowplot::get_legend(com_per)
+com_per <- com_per + theme(legend.position = "none")
+
+# antenatal visits
+com_row <- plot_grid(com_num, com_per)
+com_plus <- plot_grid(com_row, com_leg, ncol = 1, rel_heights = c(1, 0.2))
+plot_grid(com_title, com_plus, ncol = 1, rel_heights = c(0.1, 1))
+```
+
+There seem to be relatively high levels of missing data until the mid-late 1990s, however, it seems the caesarian proportion stays fairly constant over time.
+
+## Birth Outcomes
+
+```{r out}
+# birth outcomes
+# Examine by year
+# create numerical and proportion for each covariate
+# numerical uses position = "stack", proportion uses position = "fill"
+out_plot <- deidentified %>% group_by(DeliveryYear) %>%
+  summarise(`Single Live Birth` = sum(OutCome == "Single Live Birth", na.rm = TRUE),
+            `Multiple Live Born` = sum(OutCome == "Multiple Live Born", na.rm = TRUE),
+            `Multiple Some Stillborn` = sum(OutCome == "Multiple Some Stillborn", na.rm = TRUE),
+            `Single Stillborn` = sum(OutCome == "Single Stillborn", na.rm = TRUE),
+            `Multiple Stillborn` = sum(OutCome == "Multiple Stillborn", na.rm = TRUE),
+            Abortion = sum(OutCome == "Abortion", na.rm = TRUE),
+            Missing = sum(is.na(OutCome))) %>%
+  gather(key = "key", value = "value", `Single Live Birth`:Missing) %>%
+  filter(!is.na(DeliveryYear)) %>%
+  mutate(key = factor(key, levels = c("Single Live Birth", "Multiple Live Born", 
+                                      "Multiple Some Stillborn", 
+                                      "Single Stillborn", "Multiple Stillborn",  
+                                      "Abortion", "Missing")))
+
+out_num <- ggplot(out_plot, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "stack", show.legend = FALSE) +
+  scale_fill_viridis_d() +
+  ylab("Pregnancies") + xlab("") + 
+  theme_bw()
+
+out_per <- ggplot(out_plot, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "fill") +
+  scale_fill_viridis_d(name = "") +
+  ylab("Proportion of Pregnancies") + xlab("") + 
+  theme_bw() + theme(legend.position = "bottom")
+
+# title
+out_title <- ggdraw() +
+  draw_label("Birth Outcome by Delivery Year",
+    fontface = 'bold', x = 0, hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 7))
+
+# legend
+out_leg <- cowplot::get_legend(out_per)
+out_per <- out_per + theme(legend.position = "none")
+
+# antenatal visits
+out_row <- plot_grid(out_num, out_per)
+out_plus <- plot_grid(out_row, out_leg, ncol = 1, rel_heights = c(1, 0.2))
+plot_grid(out_title, out_plus, ncol = 1, rel_heights = c(0.1, 1))
+```
+
+These data are very complete and, reassuringly, show consistently high proportions of singleton live births.
+
+## Birthweight
+
+```{r wt}
+# birthweight
+# Examine by year
+# create numerical and proportion for each covariate
+# numerical uses position = "stack", proportion uses position = "fill"
+wt_plot <- deidentified %>% group_by(DeliveryYear) %>%
+  summarise(ELBW = sum(Birthweight < 1 & Birthweight > 0, na.rm = TRUE),
+            VLBW = sum(Birthweight < 1.5 & Birthweight > 1, na.rm = TRUE),
+            LBW = sum(Birthweight < 2.5 & Birthweight > 1.5, na.rm = TRUE),
+            NBW = sum(Birthweight > 2.5, na.rm = TRUE),
+            Missing = sum(is.na(Birthweight) | Birthweight == 0)) %>% # lots of zeros are likely missing
+  gather(key = "key", value = "value", ELBW:Missing) %>%
+  filter(!is.na(DeliveryYear)) %>%
+  mutate(key = factor(key, levels = c("ELBW",  
+                                      "VLBW", 
+                                      "LBW", "NBW",  
+                                       "Missing")))
+
+wt_num <- ggplot(wt_plot, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "stack", show.legend = FALSE) +
+  scale_fill_viridis_d() +
+  ylab("Pregnancies") + xlab("") + 
+  theme_bw()
+
+wt_per <- ggplot(wt_plot, aes(x = DeliveryYear, y = value, 
+                                group = fct_rev(key), fill = key)) + 
+  geom_area(alpha = 0.8, position = "fill") +
+  scale_fill_viridis_d(name = "",
+                       labels = c("Extremely Low Birth Weight",  
+                                      "Very Low Birth Weight", 
+                                      "Low Birth Weight", "> 2.5 Kilograms",  
+                                       "Missing")) +
+  ylab("Proportion of Pregnancies") + xlab("") + 
+  theme_bw() + theme(legend.position = "bottom")
+
+# title
+wt_title <- ggdraw() +
+  draw_label("Birthweight by Delivery Year",
+    fontface = 'bold', x = 0, hjust = 0) +
+  theme(plot.margin = margin(0, 0, 0, 7))
+
+# legend
+wt_leg <- cowplot::get_legend(wt_per)
+wt_per <- wt_per + theme(legend.position = "none")
+
+# antenatal visits
+wt_row <- plot_grid(wt_num, wt_per)
+wt_plus <- plot_grid(wt_row, wt_leg, ncol = 1, rel_heights = c(1, 0.2))
+plot_grid(wt_title, wt_plus, ncol = 1, rel_heights = c(0.1, 1))
+```
+
+# Primary Analysis
+
+I need to start with multiple imputation (n = `20`) with `4` knots for continuous variables. I will include all the variables that will feature as covariates in the primary analysis. Those include `DeliveryYear`, `AgeAtDelivery`, `AntenatalVisits`, `Education`, `PregnancyNumber`, `Scholar`, `PregnancyPlanned`, `ContraceBe`, `ContBeMod`, `Refugee`, and `ResStatus`.
+
+```{r imp, results="hide", warning=FALSE}
+set.seed(1111) # for reliable imputations
+
+# make dataset with non-missing Antenatal Visits
+mod1df <- deidentified %>% filter(!is.na(AntenatalVisits))
+mod1_imp <- aregImpute(~ DeliveryYear + AgeAtDelivery + Education + 
+                         PregnancyNumber + Scholar + PregnancyPlanned + ContraceBe +
+                         ContBeMod + Refugee + ResStatus, data = mod1df, n.impute = 20, nk = 4, pr = FALSE)
+
+# make dataset with non-missing Skilled Birth Attendant Presence
+mod2df <- deidentified %>% filter(!is.na(ModAtt))
+mod2_imp <- aregImpute(~ DeliveryYear + AgeAtDelivery + AntenatalVisits + Education + 
+                         PregnancyNumber + Scholar + PregnancyPlanned + ContraceBe +
+                         ContBeMod + Refugee + ResStatus, data = mod2df, n.impute = 20, nk = 4, pr = FALSE)
+
+# make dataset with non-missing Health Facility
+mod3df <- deidentified %>% filter(!is.na(DeliveryHealth))
+mod3_imp <- aregImpute(~ DeliveryYear + AgeAtDelivery + AntenatalVisits + Education + 
+                         PregnancyNumber + Scholar + PregnancyPlanned + ContraceBe +
+                         ContBeMod + Refugee + ResStatus, data = mod3df, n.impute = 20, nk = 4, pr = FALSE)
+
+```
+
+## Model 1: Ordinal Predictive Model for Antenatal Visit Attendance
+
+This model will use ordinal logistic regression to predict how each of the following covariates --- `DeliveryYear`, `AgeAtDelivery`, `Education`, `PregnancyNumber`, `Scholar`, `PregnancyPlanned`, `ContBeMod`, and `Refugee` --- predict and additional `AntenatalVisit`. Continuous covariates (`DeliveryYear`, `AgeAtDelivery`, and `Education`) will be modeled as restricted cubic splines with `5` knots. `PregnancyNumber` will be modeled linearly due to it's low range and low variability. `Scholar` and `ContBeMod` with be modeled as dichotomous, `PregnancyPlanned` will be modeld as categorical with `Unitended Pregnancy` as the reference group, and `Refugee` will be modeled as categorical with `South African` as the reference group. We will only include pregnancies with non-missing values for `AntenatalVisits` (n = `r sum(!is.na(deidentified$AntenatalVisits))`).
+
+For the elements modeled as restricted cubic splines, we have selected the following comparisons. For `DeliveryYear`, we will present odds ratios from `1993` our first year, compared to `2018` the most recent year, as well as both years compared to `2004`, when antiretroviral therapy was rolled out via a national program in South Africa. For `AgeAtDelivery`, we will present the odds ratios for `15` as compared to `25`, `25` compared to `35`, and `35` as compared to `45`. For `Education`, we will present the odds ratios for `0` as compared to `7` and `7` as compared to `12`. For these covariates we will also present partial effects plots.
+
+```{r mod1}
+# run model 1
+mod1 <- fit.mult.impute(AntenatalVisits ~ rcs(DeliveryYear, 5) + rcs(AgeAtDelivery, 5) +
+                          rcs(Education, 5) + PregnancyNumber + Scholar + PregnancyPlanned +
+                          ContBeMod + Refugee + ResStatus, orm, mod1_imp, data = mod1df, pr = FALSE)
+print(mod1)
+
+# make datadist for plotting
+dd <- datadist(mod1df)
+options(datadist = 'dd')
+
+# anova table
+print(anova(mod1))
+
+# get ORs
+mod1s1 <- as_tibble(summary(mod1, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(15, 25), Education = c(0, 7)),
+                    rownames = NA)
+mod1s2 <- as_tibble(summary(mod1, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(25, 35), Education = c(7, 12)),
+                    rownames = NA)
+mod1s3 <- as_tibble(summary(mod1, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(35, 45), Education = c(7, 12)),
+                    rownames = NA)
+# combine into one table
+mod1s <- bind_rows(mod1s1, mod1s2, mod1s3) %>% rownames_to_column(., var = "Covariate") %>%
+  distinct(Low, High, Effect, .keep_all = TRUE) %>% column_to_rownames(., var = "Covariate")
+
+# clean up tibble
+mod1srows <- rownames(mod1s %>% filter(Type == 1))
+mod1s <- mod1s %>% filter(Type == 2)
+rownames(mod1s) <- mod1srows
+mod1s <- mod1s[order(row.names(mod1s)), ]
+
+# Make row names nicer
+rownames(mod1s) <- c("Age (35 vs. 25)",
+                    "Age (45 vs. 35)",
+                    "Age (25 vs. 15)",
+                    "Modern Contraceptive Use Prior to Pregnancy",
+                    "Delivery Year (2004 vs. 1993)",
+                    "Delivery Year (2018 vs. 2004)",
+                    "Education (12 vs. 7 Years)",
+                    "Education (7 vs. 0 Years)",
+                    "Previous Pregnancies",
+                    "Other vs. Unintended Pregnancy",
+                    "Intended vs. Unintended Pregnancy",
+                    "Mozambican vs. South African",
+                    "Other Nationality vs. South African",
+                    "Temporary vs. Permanent",
+                    "Other vs. Permanent",
+                    "Current Student vs. Not")
+
+# print table
+mod1s %>% select(-S.E., -Type, -Low, -High, -Diff.) %>% kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE, fixed_thead = TRUE) %>%
+  scroll_box(width = "800px", height = "500px")
+
+# set up dataframe for forest plot
+mod1sfp <- mod1s %>% select(-S.E., -Type, -Low, -High, -Diff.) %>%
+  rownames_to_column(., "Comparison") %>% 
+  mutate(cat = c(NA, NA, "Age",
+                 "Previous Modern Contraceptive Use",
+                 "Delivery Year", NA,
+                 NA, "Years of Education",
+                 "Previous Pregnancies",
+                 NA, "Pregnancy Intention",
+                 "Nationality vs. South African", NA,
+                 "Residency Status vs. Permanent", NA, 
+                 "Student"),
+         name = c("35 vs. 25", "45 vs. 35", "25 vs. 15",
+                  "Yes vs. No",
+                  "2004 vs. 1993", "2018 vs. 2004",
+                  "12 vs. 7", "7 vs. 0",
+                  "+1",
+                  "Other vs. No", "Yes vs. No",
+                  "Mozambican", "Other", 
+                  "Temporary", "Other",
+                  "Yes vs. No"),
+         num = c(2, 3, 1,
+                 4,
+                 5, 6,
+                 8, 7,
+                 9,
+                 11, 10,
+                 12, 13,
+                 14, 15,
+                 16))
+  
+
+# make forest plot (of not, not on log scale, see figures.Rmd for that)
+forest(x = mod1sfp$Effect, ci.lb = mod1sfp$`Lower 0.95`, ci.ub = mod1sfp$`Upper 0.95`,
+       slab = mod1sfp$name,  
+       header = "Ordinal Model for Antenatal Visit Attendance", 
+       cex = 0.7,
+       subset = order(-mod1sfp$num), refline = 1, xlab = "Adjusted Odds Ratio",
+       top = 2, psize = 1,
+       ilab.pos = c(4), xlim = c(-15, 18), 
+       rows = c(1, 3:4, 6:7, 9:10, 12, 14:15, 17:18, 20, 22:24), 
+       ylim = c(0, 27))
+# add text for subgroups
+text(-15, c(2, 5, 8, 11, 13, 16, 19, 21, 25), 
+     pos=4, c("Student",
+              "Migrant Status vs. Resident",
+              "Nationality vs. South African",
+              "Pregnancy Intention",
+              "Previous Pregnancies",
+              "Years of Education",
+              "Delivery Year",
+              "Previous Modern Contraceptive Use",
+              "Age"),
+     cex = 0.75, font =2)
+
+# check model assumptions for continuous covariates
+# using mean absolute differences for Delivery Year to make it work
+par(mfrow=c(3,4))
+plot.xmean.ordinaly(AntenatalVisits ~ abs(DeliveryYear - 2009) + AgeAtDelivery +
+                          Education + PregnancyNumber + Scholar + PregnancyPlanned +
+                          ContBeMod + Refugee + ResStatus, data = mod1df, topcats = 3,
+                    subn = FALSE)
+title(main = "Comparing the means of X|Y with (dashed) and without (solid) assuming Proportional Odds",
+      line = -1,
+      outer = TRUE)
+```
+
+As we can see from the anova, `DeliveryYear`, `Education`, and `PregnancyPlanned` are the most important covariates in predicted antenatal visits. The proportion odds assumption also seems to be farily well met, except at the extreme of antenatal visits attended!
+
+```{r mod1pe, warning=FALSE}
+# examine partial effects plots for covariates
+# all covariates
+qu1 <- Quantile(mod1)
+med1 <- function(x) qu1(.5, x)
+ggplot(Predict(mod1, fun = med1))
+
+# specific covariates (year, age, and level of education)
+p1_yr <- Predict(mod1, DeliveryYear, fun = med1)
+p1_age <- Predict(mod1, AgeAtDelivery, fun = med1)
+p1_edu <- Predict(mod1, Education, fun = med1)
+
+mod1_yr_plot <- ggplot(p1_yr) + labs(caption = "") + theme_bw() +
+  scale_y_continuous(name = "Median Antenatal Visits", breaks = seq(0, 10, 1)) +
+  scale_x_continuous(breaks = seq(1994, 2018, 2)) +
+  coord_cartesian(ylim = c(0, 10))
+
+
+mod1_age_plot <- ggplot(p1_age) + labs(caption = "") + theme_bw() +
+  scale_y_continuous(name = "Median Antenatal Visits", breaks = seq(0, 4, 1)) +
+  scale_x_continuous(breaks = seq(10, 60, 5)) +
+  coord_cartesian(ylim = c(0, 4))
+
+mod1_edu_plot <- ggplot(p1_edu) + labs(caption = "*Or equivalent per ABET/NQF") + theme_bw() +
+  scale_y_continuous(name = "") +
+  scale_x_continuous(name = "Years of Education*",
+                     breaks = seq(0, 15, 3)) +
+  coord_cartesian(ylim = c(0, 4))
+
+mod1_yr_plot
+plot_grid(mod1_age_plot, mod1_edu_plot, nrow = 1)
+```
+
+**Model 1 Validation & Calibration**
+
+```{r mod1valcal, results="asis"}
+# update model so we can validate and calibrate it.
+f1 <- update(mod1, x = TRUE, y = TRUE)
+
+# validate
+val1 <- validate(f1, method = "boot", B = 1000, cluster = mod1df$Id)
+html(val1)
+
+# calibrate won't work for "orm"
+# cal1 <- calibrate(f1, method = "boot", B = 1000, cluster = mod1df$Id)
+# plot(cal1, subtitles = FALSE)
+```
+
+## Model 2: Logistic Predictive Model for Skilled Birth Attendant Presence
+
+This model will use logistic regression to predict how each of the following covariates --- `DeliveryYear`, `AgeAtDelivery`, `Education`, `AntenatalVisits`, `PregnancyNumber`, `Scholar`, `PregnancyPlanned`, `ContBeMod`, and `Refugee` --- predict likelihood of having a skilled birth attendant at delivery (`ModAtt`). Continuous covariates (`DeliveryYear`, `AgeAtDelivery`, `AntenatalVisits` and `Education`) will be modeled as restricted cubic splines with `5` knots. `PregnancyNumber` will be modeled linearly due to it's low range and low variability. `Scholar` and `ContBeMod` with be modeled as dichotomous, `PregnancyPlanned` will be modeld as categorical with `Unitended Pregnancy` as the reference group, and `Refugee` will be modeled as categorical with `South African` as the reference group. We will only include pregnancies with non-missing values for `AntenatalVisits` (n = `r sum(!is.na(deidentified$AntenatalVisits))`).
+
+For the elements modeled as restricted cubic splines, we have selected the following comparisons. For `DeliveryYear`, we will present odds ratios from `1993` our first year, compared to `2018` the most recent year, as well as both years compared to `2004`, when antiretroviral therapy was rolled out via a national program in South Africa. For `AgeAtDelivery`, we will present the odds ratios for `15` as compared to `25`, `25` compared to `35`, and `35` as compared to `45`. For `AntenatalVisits`, we will present the odds ratios for `0` as compared to `4` and `4` as compared to `8`. For `Education`, we will present the odds ratios for `0` as compared to `7` and `7` as compared to `12`. For these covariates we will also present partial effects plots.
+
+```{r mod2}
+# run model 2
+mod2 <- fit.mult.impute(ModAtt ~ rcs(DeliveryYear, 5) + rcs(AgeAtDelivery, 5) + rcs(AntenatalVisits, 5) +
+                          rcs(Education, 5) + PregnancyNumber + Scholar + PregnancyPlanned +
+                          ContBeMod + Refugee + ResStatus, lrm, mod2_imp, data = mod2df, pr = FALSE)
+print(mod2)
+
+# make datadist for plotting
+dd <- datadist(mod2df)
+options(datadist = 'dd')
+
+# anova
+print(anova(mod2))
+
+# get ORs
+mod2s1 <- as_tibble(summary(mod2, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(15, 25), 
+                            AntenatalVisits = c(0, 4), Education = c(0, 7)),
+                    rownames = NA)
+mod2s2 <- as_tibble(summary(mod2, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(25, 35), 
+                            AntenatalVisits = c(4, 8), Education = c(7, 12)),
+                    rownames = NA)
+mod2s3 <- as_tibble(summary(mod2, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(35, 45), 
+                            AntenatalVisits = c(0, 4), Education = c(7, 12)),
+                    rownames = NA)
+mod2s <- bind_rows(mod2s1, mod2s2, mod2s3) %>% rownames_to_column(., var = "Covariate") %>%
+  distinct(Low, High, Effect, .keep_all = TRUE) %>% column_to_rownames(., var = "Covariate")
+
+# clean up tibble
+mod2srows <- rownames(mod2s %>% filter(Type == 1))
+mod2s <- mod2s %>% filter(Type == 2)
+rownames(mod2s) <- mod2srows
+mod2s <- mod2s[order(row.names(mod2s)), ]
+
+# Make row names nicer
+rownames(mod2s) <- c("Age (35 vs. 25)",
+                    "Age (45 vs. 35)",
+                    "Age (25 vs. 15)",
+                    "Antenatal Visits (8 vs. 4)",
+                    "Antenatal Visits (4 vs. 0)",
+                    "Modern Contraceptive Use Prior to Pregnancy",
+                    "Delivery Year (2004 vs. 1993)",
+                    "Delivery Year (2018 vs. 2004)",
+                    "Education (12 vs. 7 Years)",
+                    "Education (7 vs. 0 Years)",
+                    "Previous Pregnancies",
+                    "Other vs. Unintended Pregnancy",
+                    "Intended vs. Unintended Pregnancy",
+                    "Mozambican vs. South African",
+                    "Other Nationality vs. South African",
+                    "Temporary vs. Permanent",
+                    "Other vs. Permanent",
+                    "Current Student vs. Not")
+
+mod2s %>% select(-S.E., -Type, -Low, -High, -Diff.) %>% kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE, fixed_thead = TRUE) %>%
+  scroll_box(width = "800px", height = "500px")
+
+# make dataframe for forest plot
+mod2sfp <- mod2s %>% select(-S.E., -Type, -Low, -High, -Diff.) %>%
+  rownames_to_column(., "Comparison") %>% 
+  mutate(cat = c(NA, NA, "Age",
+                 NA, "Antenatal Visits",
+                 "Previous Modern Contraceptive Use",
+                 "Delivery Year", NA,
+                 NA, "Years of Education",
+                 "Previous Pregnancies",
+                 NA, "Pregnancy Intention",
+                 "Nationality vs. South African", NA,
+                 "Residency Status vs. Permanent", NA, 
+                 "Student"),
+         name = c("35 vs. 25", "45 vs. 35", "25 vs. 15",
+                  "8 vs. 4", "4 vs. 0",
+                  "Yes vs. No",
+                  "2004 vs. 1993", "2018 vs. 2004",
+                  "12 vs. 7", "7 vs. 0",
+                  "+1",
+                  "Other vs. No", "Yes vs. No",
+                  "Mozambican", "Other", 
+                  "Temporary", "Other",
+                  "Yes vs. No"),
+         num = c(2, 3, 1,
+                 5, 4,
+                 6,
+                 7, 8,
+                 10, 9,
+                 11,
+                 13, 12,
+                 14, 15,
+                 16, 17,
+                 18))
+  
+
+# make forest plot
+forest(x = mod2sfp$Effect, ci.lb = mod2sfp$`Lower 0.95`, ci.ub = mod2sfp$`Upper 0.95`,
+       slab = mod2sfp$name, 
+       header = "Logistic Model for Skilled Birth Attendant Presence", 
+       cex = 0.7,
+       subset = order(-mod2sfp$num), refline = 1, xlab = "Adjusted Odds Ratio",
+       top = 2, psize = 1,
+       ilab.pos = c(4), xlim = c(-15, 18), 
+       rows = c(1, 3:4, 6:7, 9:10, 12, 14:15, 17:18, 20, 22:23, 25:27), 
+       ylim = c(0, 30))
+# add text for subgroups
+text(-15, c(2, 5, 8, 11, 13, 16, 19, 21, 24, 28), 
+     pos=4, c("Student",
+              "Migrant Status vs. Resident",
+              "Nationality vs. South African",
+              "Pregnancy Intention",
+              "Previous Pregnancies",
+              "Years of Education",
+              "Delivery Year",
+              "Previous Modern Contraceptive Use",
+              "Antenatal Visits",
+              "Age"),
+     cex = 0.7, font =2)
+```
+
+As we can see from the anova, `DeliveryYear`, `Education`, and `PregnancyNumber` are the most important covariates in predicted antenatal visits.
+
+```{r mod2pe, warning=FALSE}
+# partial effects for all covariates
+ggplot(Predict(mod2, fun = plogis))
+
+# partial effects plot for specific covariates
+p2_yr <- Predict(mod2, DeliveryYear, fun = plogis)
+p2_age <- Predict(mod2, AgeAtDelivery, fun = plogis)
+p2_ant <- Predict(mod2, AntenatalVisits, fun = plogis)
+p2_edu <- Predict(mod2, Education, fun = plogis)
+
+mod2_yr_plot <- ggplot(p2_yr) + labs(caption = "") + theme_bw() +
+  scale_y_continuous(name = "Proportion with Skilled Birth Attendant", 
+                     breaks = seq(0, 1, 0.1)) +
+  scale_x_continuous(breaks = seq(1994, 2018, 4)) +
+  coord_cartesian(ylim = c(0, 1))
+
+mod2_age_plot <- ggplot(p2_age) + labs(caption = "") + theme_bw() +
+  scale_y_continuous(name = "", 
+                     breaks = seq(0, 1, 0.1)) +
+  scale_x_continuous(breaks = seq(10, 60, 5)) +
+  coord_cartesian(ylim = c(0, 1))
+
+mod2_ant_plot <- ggplot(p2_ant) + labs(caption = "") + theme_bw() +
+  scale_y_continuous(name = "Proportion with Skilled Birth Attendant", 
+                     breaks = seq(0, 1, 0.1)) +
+  scale_x_continuous(breaks = seq(0, 15, 3)) +
+  coord_cartesian(ylim = c(0, 1))
+
+mod2_edu_plot <- ggplot(p2_edu) + labs(caption = "") + theme_bw() +
+  scale_y_continuous(name = "", 
+                     breaks = seq(0, 1, 0.1)) +
+  scale_x_continuous(breaks = seq(0, 15, 3)) +
+  coord_cartesian(ylim = c(0, 1))
+
+
+plot_grid(mod2_yr_plot, mod2_age_plot, nrow = 1)
+plot_grid(mod2_ant_plot, mod2_edu_plot, nrow = 1)
+```
+
+**Model 2 Validation & Calibration**
+
+```{r mod2valcal, results="asis"}
+# update model so we can validate and calibrate it.
+f2 <- update(mod2, x = TRUE, y = TRUE)
+
+# validate
+val2 <- validate(f2, method = "boot", B = 1000, cluster = mod2df$Id)
+html(val2)
+
+# calibrate
+cal2 <- calibrate(f2, method = "boot", B = 1000, cluster = mod2df$Id)
+plot(cal2, subtitles = FALSE)
+```
+
+## Model 3: Logistic Predictive Model for Health Facility Delivery
+
+This model will use logistic regression to predict how each of the following covariates --- `DeliveryYear`, `AgeAtDelivery`, `Education`, `AntenatalVisits`, `PregnancyNumber`, `Scholar`, `PregnancyPlanned`, `ContBeMod`, and `Refugee` --- predict likelihood of delivering at a health facility (`DeliveryHealth`). Continuous covariates (`DeliveryYear`, `AgeAtDelivery`, `AntenatalVisits` and `Education`) will be modeled as restricted cubic splines with `5` knots. `PregnancyNumber` will be modeled linearly due to it's low range and low variability. `Scholar` and `ContBeMod` with be modeled as dichotomous, `PregnancyPlanned` will be modeld as categorical with `Unitended Pregnancy` as the reference group, and `Refugee` will be modeled as categorical with `South African` as the reference group. We will only include pregnancies with non-missing values for `AntenatalVisits` (n = `r sum(!is.na(deidentified$AntenatalVisits))`).
+
+For the elements modeled as restricted cubic splines, we have selected the following comparisons. For `DeliveryYear`, we will present odds ratios from `1993` our first year, compared to `2018` the most recent year, as well as both years compared to `2004`, when antiretroviral therapy was rolled out via a national program in South Africa. For `AgeAtDelivery`, we will present the odds ratios for `15` as compared to `25`, `25` compared to `35`, and `35` as compared to `45`. For `AntenatalVisits`, we will present the odds ratios for `0` as compared to `4` and `4` as compared to `8`. For `Education`, we will present the odds ratios for `0` as compared to `7` and `7` as compared to `12`. For these covariates we will also present partial effects plots.
+
+```{r mod3}
+# run model 3
+mod3 <- fit.mult.impute(DeliveryHealth ~ rcs(DeliveryYear, 5) + rcs(AgeAtDelivery, 5) + rcs(AntenatalVisits, 5) +
+                          rcs(Education, 5) + PregnancyNumber + Scholar + PregnancyPlanned +
+                          ContBeMod + Refugee + ResStatus, lrm, mod3_imp, data = mod3df, pr = FALSE)
+print(mod3)
+
+# make datadist for plotting
+dd <- datadist(mod3df)
+options(datadist = 'dd')
+
+# anova
+print(anova(mod3))
+
+# get ORs
+mod3s1 <- as_tibble(summary(mod3, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(15, 25), 
+                            AntenatalVisits = c(0, 4), Education = c(0, 7)),
+                    rownames = NA)
+mod3s2 <- as_tibble(summary(mod3, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(25, 35), 
+                            AntenatalVisits = c(4, 8), Education = c(7, 12)),
+                    rownames = NA)
+mod3s3 <- as_tibble(summary(mod3, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(35, 45), 
+                            AntenatalVisits = c(0, 4), Education = c(7, 12)),
+                    rownames = NA)
+mod3s <- bind_rows(mod3s1, mod3s2, mod3s3) %>% rownames_to_column(., var = "Covariate") %>%
+  distinct(Low, High, Effect, .keep_all = TRUE) %>% column_to_rownames(., var = "Covariate")
+
+# clean up tibble
+mod3srows <- rownames(mod3s %>% filter(Type == 1))
+mod3s <- mod3s %>% filter(Type == 2)
+rownames(mod3s) <- mod3srows
+mod3s <- mod3s[order(row.names(mod3s)), ]
+
+# Make row names nicer
+rownames(mod3s) <- c("Age (35 vs. 25)",
+                    "Age (45 vs. 35)",
+                    "Age (25 vs. 15)",
+                    "Antenatal Visits (8 vs. 4)",
+                    "Antenatal Visits (4 vs. 0)",
+                    "Modern Contraceptive Use Prior to Pregnancy",
+                    "Delivery Year (2004 vs. 1993)",
+                    "Delivery Year (2018 vs. 2004)",
+                    "Education (12 vs. 7 Years)",
+                    "Education (7 vs. 0 Years)",
+                    "Previous Pregnancies",
+                    "Other vs. Unintended Pregnancy",
+                    "Intended vs. Unintended Pregnancy",
+                    "Mozambican vs. South African",
+                    "Other Nationality vs. South African",
+                    "Temporary vs. Permanent",
+                    "Other vs. Permanent",
+                    "Current Student vs. Not")
+
+mod3s %>% select(-S.E., -Type, -Low, -High, -Diff.) %>% kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE, fixed_thead = TRUE) %>%
+  scroll_box(width = "800px", height = "500px")
+
+# make dataframe for forest plot
+mod3sfp <- mod3s %>% select(-S.E., -Type, -Low, -High, -Diff.) %>%
+  rownames_to_column(., "Comparison") %>% 
+  mutate(cat = c(NA, NA, "Age",
+                 NA, "Antenatal Visits",
+                 "Previous Modern Contraceptive Use",
+                 "Delivery Year", NA,
+                 NA, "Years of Education",
+                 "Previous Pregnancies",
+                 NA, "Pregnancy Intention",
+                 "Nationality vs. South African", NA,
+                 "Residency Status vs. Permanent", NA, 
+                 "Student"),
+         name = c("35 vs. 25", "45 vs. 35", "25 vs. 15",
+                  "8 vs. 4", "4 vs. 0",
+                  "Yes vs. No",
+                  "2004 vs. 1993", "2018 vs. 2004",
+                  "12 vs. 7", "7 vs. 0",
+                  "+1",
+                  "Other vs. No", "Yes vs. No",
+                  "Mozambican", "Other", 
+                  "Temporary", "Other",
+                  "Yes vs. No"),
+         num = c(2, 3, 1,
+                 5, 4,
+                 6,
+                 7, 8,
+                 10, 9,
+                 11,
+                 13, 12,
+                 14, 15,
+                 16, 17,
+                 18))
+  
+
+# make forest plot
+forest(x = mod3sfp$Effect, ci.lb = mod3sfp$`Lower 0.95`, ci.ub = mod3sfp$`Upper 0.95`,
+       slab = mod3sfp$name, 
+       header = "Logistic Model for Health Facility Delivery", 
+       cex = 0.7,
+       subset = order(-mod3sfp$num), refline = 1, xlab = "Adjusted Odds Ratio",
+       top = 2, psize = 1,
+       ilab.pos = c(4), xlim = c(-15, 18), 
+       rows = c(1, 3:4, 6:7, 9:10, 12, 14:15, 17:18, 20, 22:23, 25:27), 
+       ylim = c(0, 30))
+# add text for subgroups
+text(-15, c(2, 5, 8, 11, 13, 16, 19, 21, 24, 28), 
+     pos=4, c("Student",
+              "Migrant Status vs. Resident",
+              "Nationality vs. South African",
+              "Pregnancy Intention",
+              "Previous Pregnancies",
+              "Years of Education",
+              "Delivery Year",
+              "Previous Modern Contraceptive Use",
+              "Antenatal Visits",
+              "Age"),
+     cex = 0.7, font =2)
+```
+
+As we can see from the anova, `DeliveryYear`, `Education`, and `PregnancyNumber` are the most important covariates in predicted antenatal visits.
+
+```{r mod3pe, warning=FALSE}
+# partial effects plot for all covariates
+ggplot(Predict(mod3, fun = plogis))
+
+# partial effects plot for specific covariates
+p3_yr <- Predict(mod3, DeliveryYear, fun = plogis)
+p3_age <- Predict(mod3, AgeAtDelivery, fun = plogis)
+p3_ant <- Predict(mod3, AntenatalVisits, fun = plogis)
+p3_edu <- Predict(mod3, Education, fun = plogis)
+
+mod3_yr_plot <- ggplot(p3_yr) + labs(caption = "") + theme_bw() +
+  scale_y_continuous(name = "Proportion of Deliveries at Health Facility", 
+                     breaks = seq(0, 1, 0.1)) +
+  scale_x_continuous(breaks = seq(1994, 2018, 4)) +
+  coord_cartesian(ylim = c(0, 1))
+
+mod3_age_plot <- ggplot(p3_age) + labs(caption = "") + theme_bw() +
+  scale_y_continuous(name = "", 
+                     breaks = seq(0, 1, 0.1)) +
+  scale_x_continuous(breaks = seq(10, 60, 5)) +
+  coord_cartesian(ylim = c(0, 1))
+
+mod3_ant_plot <- ggplot(p3_ant) + labs(caption = "") + theme_bw() +
+  scale_y_continuous(name = "Proportion of Deliveries at Health Facility", 
+                     breaks = seq(0, 1, 0.1)) +
+  scale_x_continuous(breaks = seq(0, 15, 3)) +
+  coord_cartesian(ylim = c(0, 1))
+
+mod3_edu_plot <- ggplot(p3_edu) + labs(caption = "") + theme_bw() +
+  scale_y_continuous(name = "", 
+                     breaks = seq(0, 1, 0.1)) +
+  scale_x_continuous(breaks = seq(0, 15, 3)) +
+  coord_cartesian(ylim = c(0, 1))
+
+
+plot_grid(mod3_yr_plot, mod3_age_plot, nrow = 1)
+plot_grid(mod3_ant_plot, mod3_edu_plot, nrow = 1)
+```
+
+**Model 3 Validation & Calibration**
+
+```{r mod3valcal, results="asis"}
+# update model so we can validate and calibrate it.
+f3 <- update(mod3, x = TRUE, y = TRUE)
+
+# validate
+val3 <- validate(f3, method = "boot", B = 1000, cluster = mod3df$Id)
+html(val3)
+
+# calibrate
+cal3 <- calibrate(f3, method = "boot", B = 1000, cluster = mod3df$Id)
+plot(cal3, subtitles = FALSE)
+```
+
+# Sensitivity Analyses
+
+## Births \< 6 months before observation date
+
+### Antenatal Visits
+
+```{r mod1sens1}
+######### FOR EACH SENSITIVITY ANALYSIS #######
+## Will need to impute dataset without missing outcomes
+## Run models, create dataframe of model coefficients
+################################################3######
+
+# impute data
+mod1dfsens1 <- mod1df %>% filter(ObsToDelivery < 182.5)
+mod1sens1_imp <- aregImpute(~ DeliveryYear + AgeAtDelivery + Education + 
+                         PregnancyNumber + Scholar + PregnancyPlanned + 
+                         ContBeMod + Refugee + ResStatus, data = mod1dfsens1, n.impute = 10, nk = 4, pr = FALSE)
+
+# run model
+mod1sens1 <- fit.mult.impute(AntenatalVisits ~ rcs(DeliveryYear, 5) + rcs(AgeAtDelivery, 5) +
+                          rcs(Education, 5) + PregnancyNumber + Scholar + PregnancyPlanned +
+                          ContBeMod + Refugee + ResStatus, orm, mod1sens1_imp, data = mod1dfsens1, pr = FALSE)
+print(mod1sens1)
+
+# make datadist for plotting
+dd <- datadist(mod1dfsens1)
+options(datadist = 'dd')
+
+# get ORs
+mod1s1s1 <- as_tibble(summary(mod1sens1, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(15, 25), Education = c(0, 7)),
+                    rownames = NA)
+mod1s2s1 <- as_tibble(summary(mod1sens1, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(25, 35), Education = c(7, 12)),
+                    rownames = NA)
+mod1s3s1 <- as_tibble(summary(mod1sens1, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(35, 45), Education = c(7, 12)),
+                    rownames = NA)
+mod1ss1 <- bind_rows(mod1s1s1, mod1s2s1, mod1s3s1) %>% rownames_to_column(., var = "Covariate") %>%
+  distinct(Low, High, Effect, .keep_all = TRUE) %>% column_to_rownames(., var = "Covariate")
+
+# clean up tibble
+mod1ss1rows <- rownames(mod1ss1 %>% filter(Type == 1))
+mod1ss1 <- mod1ss1 %>% filter(Type == 2)
+rownames(mod1ss1) <- mod1ss1rows
+mod1ss1 <- mod1ss1[order(row.names(mod1ss1)), ]
+
+# Make row names nicer
+rownames(mod1ss1) <- c("Age (35 vs. 25)",
+                    "Age (45 vs. 35)",
+                    "Age (25 vs. 15)",
+                    "Modern Contraceptive Use Prior to Pregnancy",
+                    "Delivery Year (2004 vs. 1993)",
+                    "Delivery Year (2018 vs. 2004)",
+                    "Education (12 vs. 7 Years)",
+                    "Education (7 vs. 0 Years)",
+                    "Previous Pregnancies",
+                    "Other vs. Unintended Pregnancy",
+                    "Intended vs. Unintended Pregnancy",
+                    "Mozambican vs. South African",
+                    "Other Nationality vs. South African",
+                    "Temporary vs. Permanent",
+                    "Other vs. Permanent",
+                    "Current Student vs. Not")
+
+#mod1ss1 %>% select(-S.E., -Type, -Low, -High, -Diff.) %>% kable() %>%
+#  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+#                full_width = FALSE, fixed_thead = TRUE) %>%
+#  scroll_box(width = "800px", height = "500px")
+```
+
+### Skilled Birth Attendant
+
+```{r mod2sens1}
+# impute data
+mod2dfsens1 <- mod2df %>% filter(ObsToDelivery < 182.5)
+mod2sens1_imp <- aregImpute(~ DeliveryYear + AgeAtDelivery + AntenatalVisits + Education + 
+                         PregnancyNumber + Scholar + PregnancyPlanned + 
+                         ContBeMod + Refugee + ResStatus, data = mod2dfsens1, n.impute = 10, nk = 4, pr = FALSE)
+
+# run model
+mod2sens1 <- fit.mult.impute(ModAtt ~ rcs(DeliveryYear, 5) + rcs(AgeAtDelivery, 5) + rcs(AntenatalVisits, 5) +
+                          rcs(Education, 5) + PregnancyNumber + Scholar + PregnancyPlanned +
+                          ContBeMod + Refugee + ResStatus, lrm, mod2sens1_imp, data = mod2dfsens1, pr = FALSE)
+print(mod2sens1)
+
+# make datadist for plotting
+dd <- datadist(mod2dfsens1)
+options(datadist = 'dd')
+
+# get ORs
+mod2s1s1 <- as_tibble(summary(mod2sens1, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(15, 25), 
+                            AntenatalVisits = c(0, 4), Education = c(0, 7)),
+                    rownames = NA)
+mod2s2s1 <- as_tibble(summary(mod2sens1, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(25, 35), 
+                            AntenatalVisits = c(4, 8), Education = c(7, 12)),
+                    rownames = NA)
+mod2s3s1 <- as_tibble(summary(mod2sens1, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(35, 45), 
+                            AntenatalVisits = c(0, 4), Education = c(7, 12)),
+                    rownames = NA)
+mod2ss1 <- bind_rows(mod2s1s1, mod2s2s1, mod2s3s1) %>% rownames_to_column(., var = "Covariate") %>%
+  distinct(Low, High, Effect, .keep_all = TRUE) %>% column_to_rownames(., var = "Covariate")
+
+# clean up tibble
+mod2ss1rows <- rownames(mod2ss1 %>% filter(Type == 1))
+mod2ss1 <- mod2ss1 %>% filter(Type == 2)
+rownames(mod2ss1) <- mod2ss1rows
+mod2ss1 <- mod2ss1[order(row.names(mod2ss1)), ]
+
+# Make row names nicer
+rownames(mod2ss1) <- c("Age (35 vs. 25)",
+                    "Age (45 vs. 35)",
+                    "Age (25 vs. 15)",
+                    "Antenatal Visits (8 vs. 4)",
+                    "Antenatal Visits (4 vs. 0)",
+                    "Modern Contraceptive Use Prior to Pregnancy",
+                    "Delivery Year (2004 vs. 1993)",
+                    "Delivery Year (2018 vs. 2004)",
+                    "Education (12 vs. 7 Years)",
+                    "Education (7 vs. 0 Years)",
+                    "Previous Pregnancies",
+                    "Other vs. Unintended Pregnancy",
+                    "Intended vs. Unintended Pregnancy",
+                    "Mozambican vs. South African",
+                    "Other Nationality vs. South African",
+                    "Temporary vs. Permanent",
+                    "Other vs. Permanent",
+                    "Current Student vs. Not")
+
+#mod2ss1 %>% select(-S.E., -Type, -Low, -High, -Diff.) %>% kable() %>%
+#  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+#                full_width = FALSE, fixed_thead = TRUE) %>%
+#  scroll_box(width = "800px", height = "500px")
+```
+
+### Health Facility Delivery
+
+```{r mod3sens1}
+# impute data
+mod3dfsens1 <- mod3df %>% filter(ObsToDelivery < 182.5)
+mod3sens1_imp <- aregImpute(~ DeliveryYear + AgeAtDelivery + AntenatalVisits + Education + 
+                         PregnancyNumber + Scholar + PregnancyPlanned + 
+                         ContBeMod + Refugee + ResStatus, data = mod3dfsens1, n.impute = 10, nk = 4, pr = FALSE)
+
+# run model
+mod3sens1 <- fit.mult.impute(DeliveryHealth ~ rcs(DeliveryYear, 5) + rcs(AgeAtDelivery, 5) + rcs(AntenatalVisits, 5) +
+                          rcs(Education, 5) + PregnancyNumber + Scholar + PregnancyPlanned +
+                          ContBeMod + Refugee + ResStatus, lrm, mod3sens1_imp, data = mod3dfsens1, pr = FALSE)
+print(mod3sens1)
+
+# make datadist for plotting
+dd <- datadist(mod3dfsens1)
+options(datadist = 'dd')
+
+# get ORs
+mod3s1s1 <- as_tibble(summary(mod3sens1, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(15, 25), 
+                            AntenatalVisits = c(0, 4), Education = c(0, 7)),
+                    rownames = NA)
+mod3s2s1 <- as_tibble(summary(mod3sens1, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(25, 35), 
+                            AntenatalVisits = c(4, 8), Education = c(7, 12)),
+                    rownames = NA)
+mod3s3s1 <- as_tibble(summary(mod3sens1, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(35, 45), 
+                            AntenatalVisits = c(0, 4), Education = c(7, 12)),
+                    rownames = NA)
+mod3ss1 <- bind_rows(mod3s1s1, mod3s2s1, mod3s3s1) %>% rownames_to_column(., var = "Covariate") %>%
+  distinct(Low, High, Effect, .keep_all = TRUE) %>% column_to_rownames(., var = "Covariate")
+
+# clean up tibble
+mod3ss1rows <- rownames(mod3ss1 %>% filter(Type == 1))
+mod3ss1 <- mod3ss1 %>% filter(Type == 2)
+rownames(mod3ss1) <- mod3ss1rows
+mod3ss1 <- mod3ss1[order(row.names(mod3ss1)), ]
+
+# Make row names nicer
+rownames(mod3ss1) <- c("Age (35 vs. 25)",
+                    "Age (45 vs. 35)",
+                    "Age (25 vs. 15)",
+                    "Antenatal Visits (8 vs. 4)",
+                    "Antenatal Visits (4 vs. 0)",
+                    "Modern Contraceptive Use Prior to Pregnancy",
+                    "Delivery Year (2004 vs. 1993)",
+                    "Delivery Year (2018 vs. 2004)",
+                    "Education (12 vs. 7 Years)",
+                    "Education (7 vs. 0 Years)",
+                    "Previous Pregnancies",
+                    "Other vs. Unintended Pregnancy",
+                    "Intended vs. Unintended Pregnancy",
+                    "Mozambican vs. South African",
+                    "Other Nationality vs. South African",
+                    "Temporary vs. Permanent",
+                    "Other vs. Permanent",
+                    "Current Student vs. Not")
+
+#mod3ss1 %>% select(-S.E., -Type, -Low, -High, -Diff.) %>% kable() %>%
+#  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+#                full_width = FALSE, fixed_thead = TRUE) %>%
+#  scroll_box(width = "800px", height = "500px")
+```
+
+## Births \< 2 years before observation date
+
+### Antenatal Visits
+
+```{r mod1sens2}
+# impute data
+mod1dfsens2 <- mod1df %>% filter(ObsToDelivery < 730.5)
+mod1sens2_imp <- aregImpute(~ DeliveryYear + AgeAtDelivery + Education + 
+                         PregnancyNumber + Scholar + PregnancyPlanned + 
+                         ContBeMod + Refugee + ResStatus, data = mod1dfsens2, n.impute = 10, nk = 4, pr = FALSE)
+
+# run model
+mod1sens2 <- fit.mult.impute(AntenatalVisits ~ rcs(DeliveryYear, 5) + rcs(AgeAtDelivery, 5) +
+                          rcs(Education, 5) + PregnancyNumber + Scholar + PregnancyPlanned +
+                          ContBeMod + Refugee + ResStatus, orm, mod1sens2_imp, data = mod1dfsens2, pr = FALSE)
+print(mod1sens2)
+
+# make datadist for plotting
+dd <- datadist(mod1dfsens2)
+options(datadist = 'dd')
+
+# get ORs
+mod1s1s2 <- as_tibble(summary(mod1sens2, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(15, 25), Education = c(0, 7)),
+                    rownames = NA)
+mod1s2s2 <- as_tibble(summary(mod1sens2, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(25, 35), Education = c(7, 12)),
+                    rownames = NA)
+mod1s3s2 <- as_tibble(summary(mod1sens2, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(35, 45), Education = c(7, 12)),
+                    rownames = NA)
+mod1ss2 <- bind_rows(mod1s1s2, mod1s2s2, mod1s3s2) %>% rownames_to_column(., var = "Covariate") %>%
+  distinct(Low, High, Effect, .keep_all = TRUE) %>% column_to_rownames(., var = "Covariate")
+
+# clean up tibble
+mod1ss2rows <- rownames(mod1ss2 %>% filter(Type == 1))
+mod1ss2 <- mod1ss2 %>% filter(Type == 2)
+rownames(mod1ss2) <- mod1ss2rows
+mod1ss2 <- mod1ss2[order(row.names(mod1ss2)), ]
+
+# Make row names nicer
+rownames(mod1ss2) <- c("Age (35 vs. 25)",
+                    "Age (45 vs. 35)",
+                    "Age (25 vs. 15)",
+                    "Modern Contraceptive Use Prior to Pregnancy",
+                    "Delivery Year (2004 vs. 1993)",
+                    "Delivery Year (2018 vs. 2004)",
+                    "Education (12 vs. 7 Years)",
+                    "Education (7 vs. 0 Years)",
+                    "Previous Pregnancies",
+                    "Other vs. Unintended Pregnancy",
+                    "Intended vs. Unintended Pregnancy",
+                    "Mozambican vs. South African",
+                    "Other Nationality vs. South African",
+                    "Temporary vs. Permanent",
+                    "Other vs. Permanent",
+                    "Current Student vs. Not")
+
+#mod1ss2 %>% select(-S.E., -Type, -Low, -High, -Diff.) %>% kable() %>%
+#  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+#                full_width = FALSE, fixed_thead = TRUE) %>%
+#  scroll_box(width = "800px", height = "500px")
+```
+
+### Skilled Birth Attendant
+
+```{r mod2sens2}
+# impute data
+mod2dfsens2 <- mod2df %>% filter(ObsToDelivery < 730.5)
+mod2sens2_imp <- aregImpute(~ DeliveryYear + AgeAtDelivery + AntenatalVisits + Education + 
+                         PregnancyNumber + Scholar + PregnancyPlanned + 
+                         ContBeMod + Refugee + ResStatus, data = mod2dfsens2, n.impute = 10, nk = 4, pr = FALSE)
+
+# run model
+mod2sens2 <- fit.mult.impute(ModAtt ~ rcs(DeliveryYear, 5) + rcs(AgeAtDelivery, 5) + rcs(AntenatalVisits, 5) +
+                          rcs(Education, 5) + PregnancyNumber + Scholar + PregnancyPlanned +
+                          ContBeMod + Refugee + ResStatus, lrm, mod2sens2_imp, data = mod2dfsens2, pr = FALSE)
+print(mod2sens2)
+
+# make datadist for plotting
+dd <- datadist(mod2dfsens2)
+options(datadist = 'dd')
+
+# get ORs
+mod2s1s2 <- as_tibble(summary(mod2sens2, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(15, 25), 
+                            AntenatalVisits = c(0, 4), Education = c(0, 7)),
+                    rownames = NA)
+mod2s2s2 <- as_tibble(summary(mod2sens2, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(25, 35), 
+                            AntenatalVisits = c(4, 8), Education = c(7, 12)),
+                    rownames = NA)
+mod2s3s2 <- as_tibble(summary(mod2sens2, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(35, 45), 
+                            AntenatalVisits = c(0, 4), Education = c(7, 12)),
+                    rownames = NA)
+mod2ss2 <- bind_rows(mod2s1s2, mod2s2s2, mod2s3s2) %>% rownames_to_column(., var = "Covariate") %>%
+  distinct(Low, High, Effect, .keep_all = TRUE) %>% column_to_rownames(., var = "Covariate")
+
+# clean up tibble
+mod2ss2rows <- rownames(mod2ss2 %>% filter(Type == 1))
+mod2ss2 <- mod2ss2 %>% filter(Type == 2)
+rownames(mod2ss2) <- mod2ss2rows
+mod2ss2 <- mod2ss2[order(row.names(mod2ss2)), ]
+
+# Make row names nicer
+rownames(mod2ss2) <- c("Age (35 vs. 25)",
+                    "Age (45 vs. 35)",
+                    "Age (25 vs. 15)",
+                    "Antenatal Visits (8 vs. 4)",
+                    "Antenatal Visits (4 vs. 0)",
+                    "Modern Contraceptive Use Prior to Pregnancy",
+                    "Delivery Year (2004 vs. 1993)",
+                    "Delivery Year (2018 vs. 2004)",
+                    "Education (12 vs. 7 Years)",
+                    "Education (7 vs. 0 Years)",
+                    "Previous Pregnancies",
+                    "Other vs. Unintended Pregnancy",
+                    "Intended vs. Unintended Pregnancy",
+                    "Mozambican vs. South African",
+                    "Other Nationality vs. South African",
+                    "Temporary vs. Permanent",
+                    "Other vs. Permanent",
+                    "Current Student vs. Not")
+
+#mod2ss2 %>% select(-S.E., -Type, -Low, -High, -Diff.) %>% kable() %>%
+#  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+#                full_width = FALSE, fixed_thead = TRUE) %>%
+#  scroll_box(width = "800px", height = "500px")
+```
+
+### Health Facility Delivery
+
+```{r mod3sens2}
+# impute data
+mod3dfsens2 <- mod3df %>% filter(ObsToDelivery < 730.5)
+mod3sens2_imp <- aregImpute(~ DeliveryYear + AgeAtDelivery + AntenatalVisits + Education + 
+                         PregnancyNumber + Scholar + PregnancyPlanned + 
+                         ContBeMod + Refugee + ResStatus, data = mod3dfsens2, n.impute = 10, nk = 4, pr = FALSE)
+
+# run model
+mod3sens2 <- fit.mult.impute(DeliveryHealth ~ rcs(DeliveryYear, 5) + rcs(AgeAtDelivery, 5) + rcs(AntenatalVisits, 5) +
+                          rcs(Education, 5) + PregnancyNumber + Scholar + PregnancyPlanned +
+                          ContBeMod + Refugee + ResStatus, lrm, mod3sens2_imp, data = mod3dfsens2, pr = FALSE)
+print(mod3sens2)
+
+# make datadist for plotting
+dd <- datadist(mod3dfsens2)
+options(datadist = 'dd')
+
+# get ORs
+mod3s1s2 <- as_tibble(summary(mod3sens2, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(15, 25), 
+                            AntenatalVisits = c(0, 4), Education = c(0, 7)),
+                    rownames = NA)
+mod3s2s2 <- as_tibble(summary(mod3sens2, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(25, 35), 
+                            AntenatalVisits = c(4, 8), Education = c(7, 12)),
+                    rownames = NA)
+mod3s3s2 <- as_tibble(summary(mod3sens2, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(35, 45), 
+                            AntenatalVisits = c(0, 4), Education = c(7, 12)),
+                    rownames = NA)
+mod3ss2 <- bind_rows(mod3s1s2, mod3s2s2, mod3s3s2) %>% rownames_to_column(., var = "Covariate") %>%
+  distinct(Low, High, Effect, .keep_all = TRUE) %>% column_to_rownames(., var = "Covariate")
+
+# clean up tibble
+mod3ss2rows <- rownames(mod3ss2 %>% filter(Type == 1))
+mod3ss2 <- mod3ss2 %>% filter(Type == 2)
+rownames(mod3ss2) <- mod3ss2rows
+mod3ss2 <- mod3ss2[order(row.names(mod3ss2)), ]
+
+# Make row names nicer
+rownames(mod3ss2) <- c("Age (35 vs. 25)",
+                    "Age (45 vs. 35)",
+                    "Age (25 vs. 15)",
+                    "Antenatal Visits (8 vs. 4)",
+                    "Antenatal Visits (4 vs. 0)",
+                    "Modern Contraceptive Use Prior to Pregnancy",
+                    "Delivery Year (2004 vs. 1993)",
+                    "Delivery Year (2018 vs. 2004)",
+                    "Education (12 vs. 7 Years)",
+                    "Education (7 vs. 0 Years)",
+                    "Previous Pregnancies",
+                    "Other vs. Unintended Pregnancy",
+                    "Intended vs. Unintended Pregnancy",
+                    "Mozambican vs. South African",
+                    "Other Nationality vs. South African",
+                    "Temporary vs. Permanent",
+                    "Other vs. Permanent",
+                    "Current Student vs. Not")
+
+#mod3ss2 %>% select(-S.E., -Type, -Low, -High, -Diff.) %>% kable() %>%
+#  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+#                full_width = FALSE, fixed_thead = TRUE) %>%
+#  scroll_box(width = "800px", height = "500px")
+```
+
+## Full singleton births
+
+### Antenatal Visits
+
+```{r mod1sens3}
+# impute data
+mod1dfsens3 <- mod1df %>% filter(OutCome == "Single Live Birth")
+mod1sens3_imp <- aregImpute(~ DeliveryYear + AgeAtDelivery + Education + 
+                         PregnancyNumber + Scholar + PregnancyPlanned + 
+                         ContBeMod + Refugee + ResStatus, data = mod1dfsens3, n.impute = 10, nk = 4, pr = FALSE)
+
+# run model
+mod1sens3 <- fit.mult.impute(AntenatalVisits ~ rcs(DeliveryYear, 5) + rcs(AgeAtDelivery, 5) +
+                          rcs(Education, 5) + PregnancyNumber + Scholar + PregnancyPlanned +
+                          ContBeMod + Refugee + ResStatus, orm, mod1sens3_imp, data = mod1dfsens3, pr = FALSE)
+print(mod1sens3)
+
+# make datadist for plotting
+dd <- datadist(mod1dfsens3)
+options(datadist = 'dd')
+
+# get ORs
+mod1s1s3 <- as_tibble(summary(mod1sens3, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(15, 25), Education = c(0, 7)),
+                    rownames = NA)
+mod1s2s3 <- as_tibble(summary(mod1sens3, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(25, 35), Education = c(7, 12)),
+                    rownames = NA)
+mod1s3s3 <- as_tibble(summary(mod1sens3, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(35, 45), Education = c(7, 12)),
+                    rownames = NA)
+mod1ss3 <- bind_rows(mod1s1s3, mod1s2s3, mod1s3s3) %>% rownames_to_column(., var = "Covariate") %>%
+  distinct(Low, High, Effect, .keep_all = TRUE) %>% column_to_rownames(., var = "Covariate")
+
+# clean up tibble
+mod1ss3rows <- rownames(mod1ss3 %>% filter(Type == 1))
+mod1ss3 <- mod1ss3 %>% filter(Type == 2)
+rownames(mod1ss3) <- mod1ss3rows
+mod1ss3 <- mod1ss3[order(row.names(mod1ss3)), ]
+
+# Make row names nicer
+rownames(mod1ss3) <- c("Age (35 vs. 25)",
+                    "Age (45 vs. 35)",
+                    "Age (25 vs. 15)",
+                    "Modern Contraceptive Use Prior to Pregnancy",
+                    "Delivery Year (2004 vs. 1993)",
+                    "Delivery Year (2018 vs. 2004)",
+                    "Education (12 vs. 7 Years)",
+                    "Education (7 vs. 0 Years)",
+                    "Previous Pregnancies",
+                    "Other vs. Unintended Pregnancy",
+                    "Intended vs. Unintended Pregnancy",
+                    "Mozambican vs. South African",
+                    "Other Nationality vs. South African",
+                    "Temporary vs. Permanent",
+                    "Other vs. Permanent",
+                    "Current Student vs. Not")
+
+#mod1ss3 %>% select(-S.E., -Type, -Low, -High, -Diff.) %>% kable() %>%
+#  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+#                full_width = FALSE, fixed_thead = TRUE) %>%
+#  scroll_box(width = "800px", height = "500px")
+```
+
+### Skilled Birth Attendant
+
+```{r mod2sens3}
+# impute data
+mod2dfsens3 <- mod2df %>% filter(OutCome == "Single Live Birth")
+mod2sens3_imp <- aregImpute(~ DeliveryYear + AgeAtDelivery + AntenatalVisits + Education + 
+                         PregnancyNumber + Scholar + PregnancyPlanned + 
+                         ContBeMod + Refugee + ResStatus, data = mod2dfsens3, n.impute = 10, nk = 4, pr = FALSE)
+
+# run model
+mod2sens3 <- fit.mult.impute(ModAtt ~ rcs(DeliveryYear, 5) + rcs(AgeAtDelivery, 5) + rcs(AntenatalVisits, 5) +
+                          rcs(Education, 5) + PregnancyNumber + Scholar + PregnancyPlanned +
+                          ContBeMod + Refugee + ResStatus, lrm, mod2sens3_imp, data = mod2dfsens3, pr = FALSE)
+print(mod2sens3)
+
+# make datadist for plotting
+dd <- datadist(mod2dfsens3)
+options(datadist = 'dd')
+
+# get ORs
+mod2s1s3 <- as_tibble(summary(mod2sens3, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(15, 25), 
+                            AntenatalVisits = c(0, 4), Education = c(0, 7)),
+                    rownames = NA)
+mod2s2s3 <- as_tibble(summary(mod2sens3, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(25, 35), 
+                            AntenatalVisits = c(4, 8), Education = c(7, 12)),
+                    rownames = NA)
+mod2s3s3 <- as_tibble(summary(mod2sens3, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(35, 45), 
+                            AntenatalVisits = c(0, 4), Education = c(7, 12)),
+                    rownames = NA)
+mod2ss3 <- bind_rows(mod2s1s3, mod2s2s3, mod2s3s3) %>% rownames_to_column(., var = "Covariate") %>%
+  distinct(Low, High, Effect, .keep_all = TRUE) %>% column_to_rownames(., var = "Covariate")
+
+# clean up tibble
+mod2ss3rows <- rownames(mod2ss3 %>% filter(Type == 1))
+mod2ss3 <- mod2ss3 %>% filter(Type == 2)
+rownames(mod2ss3) <- mod2ss3rows
+mod2ss3 <- mod2ss3[order(row.names(mod2ss3)), ]
+
+# Make row names nicer
+rownames(mod2ss3) <- c("Age (35 vs. 25)",
+                    "Age (45 vs. 35)",
+                    "Age (25 vs. 15)",
+                    "Antenatal Visits (8 vs. 4)",
+                    "Antenatal Visits (4 vs. 0)",
+                    "Modern Contraceptive Use Prior to Pregnancy",
+                    "Delivery Year (2004 vs. 1993)",
+                    "Delivery Year (2018 vs. 2004)",
+                    "Education (12 vs. 7 Years)",
+                    "Education (7 vs. 0 Years)",
+                    "Previous Pregnancies",
+                    "Other vs. Unintended Pregnancy",
+                    "Intended vs. Unintended Pregnancy",
+                    "Mozambican vs. South African",
+                    "Other Nationality vs. South African",
+                    "Temporary vs. Permanent",
+                    "Other vs. Permanent",
+                    "Current Student vs. Not")
+
+#mod2ss3 %>% select(-S.E., -Type, -Low, -High, -Diff.) %>% kable() %>%
+#  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+#                full_width = FALSE, fixed_thead = TRUE) %>%
+#  scroll_box(width = "800px", height = "500px")
+```
+
+### Health Facility Delivery
+
+```{r mod3sens3}
+# impute data
+mod3dfsens3 <- mod3df %>% filter(OutCome == "Single Live Birth")
+mod3sens3_imp <- aregImpute(~ DeliveryYear + AgeAtDelivery + AntenatalVisits + Education + 
+                         PregnancyNumber + Scholar + PregnancyPlanned + 
+                         ContBeMod + Refugee + ResStatus, data = mod3dfsens3, n.impute = 10, nk = 4, pr = FALSE)
+
+# run model
+mod3sens3 <- fit.mult.impute(DeliveryHealth ~ rcs(DeliveryYear, 5) + rcs(AgeAtDelivery, 5) + rcs(AntenatalVisits, 5) +
+                          rcs(Education, 5) + PregnancyNumber + Scholar + PregnancyPlanned +
+                          ContBeMod + Refugee + ResStatus, lrm, mod3sens3_imp, data = mod3dfsens3, pr = FALSE)
+print(mod3sens3)
+
+# make datadist for plotting
+dd <- datadist(mod3dfsens3)
+options(datadist = 'dd')
+
+# get ORs
+mod3s1s3 <- as_tibble(summary(mod3sens3, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(15, 25), 
+                            AntenatalVisits = c(0, 4), Education = c(0, 7)),
+                    rownames = NA)
+mod3s2s3 <- as_tibble(summary(mod3sens3, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(25, 35), 
+                            AntenatalVisits = c(4, 8), Education = c(7, 12)),
+                    rownames = NA)
+mod3s3s3 <- as_tibble(summary(mod3sens3, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(35, 45), 
+                            AntenatalVisits = c(0, 4), Education = c(7, 12)),
+                    rownames = NA)
+mod3ss3 <- bind_rows(mod3s1s3, mod3s2s3, mod3s3s3) %>% rownames_to_column(., var = "Covariate") %>%
+  distinct(Low, High, Effect, .keep_all = TRUE) %>% column_to_rownames(., var = "Covariate")
+
+# clean up tibble
+mod3ss3rows <- rownames(mod3ss3 %>% filter(Type == 1))
+mod3ss3 <- mod3ss3 %>% filter(Type == 2)
+rownames(mod3ss3) <- mod3ss3rows
+mod3ss3 <- mod3ss3[order(row.names(mod3ss3)), ]
+
+# Make row names nicer
+rownames(mod3ss3) <- c("Age (35 vs. 25)",
+                    "Age (45 vs. 35)",
+                    "Age (25 vs. 15)",
+                    "Antenatal Visits (8 vs. 4)",
+                    "Antenatal Visits (4 vs. 0)",
+                    "Modern Contraceptive Use Prior to Pregnancy",
+                    "Delivery Year (2004 vs. 1993)",
+                    "Delivery Year (2018 vs. 2004)",
+                    "Education (12 vs. 7 Years)",
+                    "Education (7 vs. 0 Years)",
+                    "Previous Pregnancies",
+                    "Other vs. Unintended Pregnancy",
+                    "Intended vs. Unintended Pregnancy",
+                    "Mozambican vs. South African",
+                    "Other Nationality vs. South African",
+                    "Temporary vs. Permanent",
+                    "Other vs. Permanent",
+                    "Current Student vs. Not")
+
+#mod3ss3 %>% select(-S.E., -Type, -Low, -High, -Diff.) %>% kable() %>%
+#  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+#                full_width = FALSE, fixed_thead = TRUE) %>%
+#  scroll_box(width = "800px", height = "500px")
+```
+
+## First recorded births
+
+### Antenatal Visits
+
+```{r mod1sens4}
+# impute data
+mod1dfsens4 <- mod1df %>% filter(PregnancyNumber == 1)
+mod1sens4_imp <- aregImpute(~ DeliveryYear + AgeAtDelivery + Education + 
+                         Scholar + PregnancyPlanned + 
+                         ContBeMod + Refugee + ResStatus, data = mod1dfsens4, n.impute = 10, nk = 4, pr = FALSE)
+
+# run model
+mod1sens4 <- fit.mult.impute(AntenatalVisits ~ rcs(DeliveryYear, 5) + rcs(AgeAtDelivery, 5) +
+                          rcs(Education, 5) + Scholar + PregnancyPlanned +
+                          ContBeMod + Refugee + ResStatus, orm, mod1sens4_imp, data = mod1dfsens4, pr = FALSE)
+print(mod1sens4)
+
+# make datadist for plotting
+dd <- datadist(mod1dfsens4)
+options(datadist = 'dd')
+
+# get ORs
+mod1s1s4 <- as_tibble(summary(mod1sens4, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(15, 25), Education = c(0, 7)),
+                    rownames = NA)
+mod1s2s4 <- as_tibble(summary(mod1sens4, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(25, 35), Education = c(7, 12)),
+                    rownames = NA)
+mod1s3s4 <- as_tibble(summary(mod1sens4, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(35, 45), Education = c(7, 12)),
+                    rownames = NA)
+mod1ss4 <- bind_rows(mod1s1s4, mod1s2s4, mod1s3s4) %>% rownames_to_column(., var = "Covariate") %>%
+  distinct(Low, High, Effect, .keep_all = TRUE) %>% column_to_rownames(., var = "Covariate")
+
+# clean up tibble
+mod1ss4rows <- rownames(mod1ss4 %>% filter(Type == 1))
+mod1ss4 <- mod1ss4 %>% filter(Type == 2)
+rownames(mod1ss4) <- mod1ss4rows
+mod1ss4 <- mod1ss4[order(row.names(mod1ss4)), ]
+
+# Make row names nicer
+rownames(mod1ss4) <- c("Age (35 vs. 25)",
+                    "Age (45 vs. 35)",
+                    "Age (25 vs. 15)",
+                    "Modern Contraceptive Use Prior to Pregnancy",
+                    "Delivery Year (2004 vs. 1993)",
+                    "Delivery Year (2018 vs. 2004)",
+                    "Education (12 vs. 7 Years)",
+                    "Education (7 vs. 0 Years)",
+                    "Other vs. Unintended Pregnancy",
+                    "Intended vs. Unintended Pregnancy",
+                    "Mozambican vs. South African",
+                    "Other Nationality vs. South African",
+                    "Temporary vs. Permanent",
+                    "Other vs. Permanent",
+                    "Current Student vs. Not")
+
+#mod1ss4 %>% select(-S.E., -Type, -Low, -High, -Diff.) %>% kable() %>%
+#  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+#                full_width = FALSE, fixed_thead = TRUE) %>%
+#  scroll_box(width = "800px", height = "500px")
+```
+
+### Skilled Birth Attendant
+
+```{r mod2sens4}
+# impute data
+mod2dfsens4 <- mod2df %>% filter(PregnancyNumber == 1)
+mod2sens4_imp <- aregImpute(~ DeliveryYear + AgeAtDelivery + AntenatalVisits + Education + 
+                         Scholar + PregnancyPlanned + 
+                         ContBeMod + Refugee + ResStatus, data = mod2dfsens4, n.impute = 10, nk = 4, pr = FALSE)
+
+# run model
+mod2sens4 <- fit.mult.impute(ModAtt ~ rcs(DeliveryYear, 5) + rcs(AgeAtDelivery, 5) + rcs(AntenatalVisits, 5) +
+                          rcs(Education, 5) + Scholar + PregnancyPlanned +
+                          ContBeMod + Refugee + ResStatus, lrm, mod2sens4_imp, data = mod2dfsens4, pr = FALSE)
+print(mod2sens4)
+
+# make datadist for plotting
+dd <- datadist(mod2dfsens4)
+options(datadist = 'dd')
+
+# get ORs
+mod2s1s4 <- as_tibble(summary(mod2sens4, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(15, 25), 
+                            AntenatalVisits = c(0, 4), Education = c(0, 7)),
+                    rownames = NA)
+mod2s2s4 <- as_tibble(summary(mod2sens4, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(25, 35), 
+                            AntenatalVisits = c(4, 8), Education = c(7, 12)),
+                    rownames = NA)
+mod2s3s4 <- as_tibble(summary(mod2sens4, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(35, 45), 
+                            AntenatalVisits = c(0, 4), Education = c(7, 12)),
+                    rownames = NA)
+mod2ss4 <- bind_rows(mod2s1s4, mod2s2s4, mod2s3s4) %>% rownames_to_column(., var = "Covariate") %>%
+  distinct(Low, High, Effect, .keep_all = TRUE) %>% column_to_rownames(., var = "Covariate")
+
+# clean up tibble
+mod2ss4rows <- rownames(mod2ss4 %>% filter(Type == 1))
+mod2ss4 <- mod2ss4 %>% filter(Type == 2)
+rownames(mod2ss4) <- mod2ss4rows
+mod2ss4 <- mod2ss4[order(row.names(mod2ss4)), ]
+
+# Make row names nicer
+rownames(mod2ss4) <- c("Age (35 vs. 25)",
+                    "Age (45 vs. 35)",
+                    "Age (25 vs. 15)",
+                    "Antenatal Visits (8 vs. 4)",
+                    "Antenatal Visits (4 vs. 0)",
+                    "Modern Contraceptive Use Prior to Pregnancy",
+                    "Delivery Year (2004 vs. 1993)",
+                    "Delivery Year (2018 vs. 2004)",
+                    "Education (12 vs. 7 Years)",
+                    "Education (7 vs. 0 Years)",
+                    "Other vs. Unintended Pregnancy",
+                    "Intended vs. Unintended Pregnancy",
+                    "Mozambican vs. South African",
+                    "Other Nationality vs. South African",
+                    "Temporary vs. Permanent",
+                    "Other vs. Permanent",
+                    "Current Student vs. Not")
+
+#mod2ss4 %>% select(-S.E., -Type, -Low, -High, -Diff.) %>% kable() %>%
+#  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+#                full_width = FALSE, fixed_thead = TRUE) %>%
+#  scroll_box(width = "800px", height = "500px")
+```
+
+### Health Facility Delivery
+
+```{r mod3sens4}
+# impute data
+mod3dfsens4 <- mod3df %>% filter(PregnancyNumber == 1)
+mod3sens4_imp <- aregImpute(~ DeliveryYear + AgeAtDelivery + AntenatalVisits + Education + 
+                         Scholar + PregnancyPlanned + 
+                         ContBeMod + Refugee + ResStatus, data = mod3dfsens4, n.impute = 10, nk = 4, pr = FALSE)
+
+# run model
+mod3sens4 <- fit.mult.impute(DeliveryHealth ~ rcs(DeliveryYear, 5) + rcs(AgeAtDelivery, 5) + rcs(AntenatalVisits, 5) +
+                          rcs(Education, 5) + Scholar + PregnancyPlanned +
+                          ContBeMod + Refugee + ResStatus, lrm, mod3sens4_imp, data = mod3dfsens4, pr = FALSE)
+print(mod3sens4)
+
+# make datadist for plotting
+dd <- datadist(mod3dfsens4)
+options(datadist = 'dd')
+
+# get ORs
+mod3s1s4 <- as_tibble(summary(mod3sens4, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(15, 25), 
+                            AntenatalVisits = c(0, 4), Education = c(0, 7)),
+                    rownames = NA)
+mod3s2s4 <- as_tibble(summary(mod3sens4, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(25, 35), 
+                            AntenatalVisits = c(4, 8), Education = c(7, 12)),
+                    rownames = NA)
+mod3s3s4 <- as_tibble(summary(mod3sens4, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(35, 45), 
+                            AntenatalVisits = c(0, 4), Education = c(7, 12)),
+                    rownames = NA)
+mod3ss4 <- bind_rows(mod3s1s4, mod3s2s4, mod3s3s4) %>% rownames_to_column(., var = "Covariate") %>%
+  distinct(Low, High, Effect, .keep_all = TRUE) %>% column_to_rownames(., var = "Covariate")
+
+# clean up tibble
+mod3ss4rows <- rownames(mod3ss4 %>% filter(Type == 1))
+mod3ss4 <- mod3ss4 %>% filter(Type == 2)
+rownames(mod3ss4) <- mod3ss4rows
+mod3ss4 <- mod3ss4[order(row.names(mod3ss4)), ]
+
+# Make row names nicer
+rownames(mod3ss4) <- c("Age (35 vs. 25)",
+                    "Age (45 vs. 35)",
+                    "Age (25 vs. 15)",
+                    "Antenatal Visits (8 vs. 4)",
+                    "Antenatal Visits (4 vs. 0)",
+                    "Modern Contraceptive Use Prior to Pregnancy",
+                    "Delivery Year (2004 vs. 1993)",
+                    "Delivery Year (2018 vs. 2004)",
+                    "Education (12 vs. 7 Years)",
+                    "Education (7 vs. 0 Years)",
+                    "Other vs. Unintended Pregnancy",
+                    "Intended vs. Unintended Pregnancy",
+                    "Mozambican vs. South African",
+                    "Other Nationality vs. South African",
+                    "Temporary vs. Permanent",
+                    "Other vs. Permanent",
+                    "Current Student vs. Not")
+
+#mod3ss4 %>% select(-S.E., -Type, -Low, -High, -Diff.) %>% kable() %>%
+#  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+#                full_width = FALSE, fixed_thead = TRUE) %>%
+#  scroll_box(width = "800px", height = "500px")
+```
+
+## Full singleton first recorded births
+
+### Antenatal Visits
+
+```{r mod1sens5}
+# impute data
+mod1dfsens5 <- mod1df %>% filter(OutCome == "Single Live Birth" & PregnancyNumber == 1)
+mod1sens5_imp <- aregImpute(~ DeliveryYear + AgeAtDelivery + Education + 
+                         Scholar + PregnancyPlanned + 
+                         ContBeMod + Refugee + ResStatus, data = mod1dfsens5, n.impute = 10, nk = 4, pr = FALSE)
+
+# run model
+mod1sens5 <- fit.mult.impute(AntenatalVisits ~ rcs(DeliveryYear, 5) + rcs(AgeAtDelivery, 5) +
+                          rcs(Education, 5) + Scholar + PregnancyPlanned +
+                          ContBeMod + Refugee + ResStatus, orm, mod1sens5_imp, data = mod1dfsens5, pr = FALSE)
+print(mod1sens5)
+
+# make datadist for plotting
+dd <- datadist(mod1dfsens5)
+options(datadist = 'dd')
+
+# get ORs
+mod1s1s5 <- as_tibble(summary(mod1sens5, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(15, 25), Education = c(0, 7)),
+                    rownames = NA)
+mod1s2s5 <- as_tibble(summary(mod1sens5, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(25, 35), Education = c(7, 12)),
+                    rownames = NA)
+mod1s3s5 <- as_tibble(summary(mod1sens5, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(35, 45), Education = c(7, 12)),
+                    rownames = NA)
+mod1ss5 <- bind_rows(mod1s1s5, mod1s2s5, mod1s3s5) %>% rownames_to_column(., var = "Covariate") %>%
+  distinct(Low, High, Effect, .keep_all = TRUE) %>% column_to_rownames(., var = "Covariate")
+
+# clean up tibble
+mod1ss5rows <- rownames(mod1ss5 %>% filter(Type == 1))
+mod1ss5 <- mod1ss5 %>% filter(Type == 2)
+rownames(mod1ss5) <- mod1ss5rows
+mod1ss5 <- mod1ss5[order(row.names(mod1ss5)), ]
+
+# Make row names nicer
+rownames(mod1ss5) <- c("Age (35 vs. 25)",
+                    "Age (45 vs. 35)",
+                    "Age (25 vs. 15)",
+                    "Modern Contraceptive Use Prior to Pregnancy",
+                    "Delivery Year (2004 vs. 1993)",
+                    "Delivery Year (2018 vs. 2004)",
+                    "Education (12 vs. 7 Years)",
+                    "Education (7 vs. 0 Years)",
+                    "Other vs. Unintended Pregnancy",
+                    "Intended vs. Unintended Pregnancy",
+                    "Mozambican vs. South African",
+                    "Other Nationality vs. South African",
+                    "Temporary vs. Permanent",
+                    "Other vs. Permanent",
+                    "Current Student vs. Not")
+
+#mod1ss5 %>% select(-S.E., -Type, -Low, -High, -Diff.) %>% kable() %>%
+#  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+#                full_width = FALSE, fixed_thead = TRUE) %>%
+#  scroll_box(width = "800px", height = "500px")
+```
+
+### Skilled Birth Attendant
+
+```{r mod2sens5}
+# impute data
+mod2dfsens5 <- mod2df %>% filter(OutCome == "Single Live Birth" & PregnancyNumber == 1)
+mod2sens5_imp <- aregImpute(~ DeliveryYear + AgeAtDelivery + AntenatalVisits + Education + 
+                         Scholar + PregnancyPlanned + 
+                         ContBeMod + Refugee + ResStatus, data = mod2dfsens5, n.impute = 10, nk = 4, pr = FALSE)
+
+# run model
+mod2sens5 <- fit.mult.impute(ModAtt ~ rcs(DeliveryYear, 5) + rcs(AgeAtDelivery, 5) + rcs(AntenatalVisits, 5) +
+                          rcs(Education, 5) + Scholar + PregnancyPlanned +
+                          ContBeMod + Refugee + ResStatus, lrm, mod2sens5_imp, data = mod2dfsens5, pr = FALSE)
+print(mod2sens5)
+
+# make datadist for plotting
+dd <- datadist(mod2dfsens5)
+options(datadist = 'dd')
+
+# get ORs
+mod2s1s5 <- as_tibble(summary(mod2sens5, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(15, 25), 
+                            AntenatalVisits = c(0, 4), Education = c(0, 7)),
+                    rownames = NA)
+mod2s2s5 <- as_tibble(summary(mod2sens5, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(25, 35), 
+                            AntenatalVisits = c(4, 8), Education = c(7, 12)),
+                    rownames = NA)
+mod2s3s5 <- as_tibble(summary(mod2sens5, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(35, 45), 
+                            AntenatalVisits = c(0, 4), Education = c(7, 12)),
+                    rownames = NA)
+mod2ss5 <- bind_rows(mod2s1s5, mod2s2s5, mod2s3s5) %>% rownames_to_column(., var = "Covariate") %>%
+  distinct(Low, High, Effect, .keep_all = TRUE) %>% column_to_rownames(., var = "Covariate")
+
+# clean up tibble
+mod2ss5rows <- rownames(mod2ss5 %>% filter(Type == 1))
+mod2ss5 <- mod2ss5 %>% filter(Type == 2)
+rownames(mod2ss5) <- mod2ss5rows
+mod2ss5 <- mod2ss5[order(row.names(mod2ss5)), ]
+
+# Make row names nicer
+rownames(mod2ss5) <- c("Age (35 vs. 25)",
+                    "Age (45 vs. 35)",
+                    "Age (25 vs. 15)",
+                    "Antenatal Visits (8 vs. 4)",
+                    "Antenatal Visits (4 vs. 0)",
+                    "Modern Contraceptive Use Prior to Pregnancy",
+                    "Delivery Year (2004 vs. 1993)",
+                    "Delivery Year (2018 vs. 2004)",
+                    "Education (12 vs. 7 Years)",
+                    "Education (7 vs. 0 Years)",
+                    "Other vs. Unintended Pregnancy",
+                    "Intended vs. Unintended Pregnancy",
+                    "Mozambican vs. South African",
+                    "Other Nationality vs. South African",
+                    "Temporary vs. Permanent",
+                    "Other vs. Permanent",
+                    "Current Student vs. Not")
+
+#mod2ss5 %>% select(-S.E., -Type, -Low, -High, -Diff.) %>% kable() %>%
+#  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+#                full_width = FALSE, fixed_thead = TRUE) %>%
+#  scroll_box(width = "800px", height = "500px")
+```
+
+### Health Facility Delivery
+
+```{r mod3sens5}
+# impute data
+mod3dfsens5 <- mod3df %>% filter(OutCome == "Single Live Birth" & PregnancyNumber == 1)
+mod3sens5_imp <- aregImpute(~ DeliveryYear + AgeAtDelivery + AntenatalVisits + Education + 
+                         Scholar + PregnancyPlanned + 
+                         ContBeMod + Refugee + ResStatus, data = mod3dfsens5, n.impute = 10, nk = 4, pr = FALSE)
+
+# run model
+mod3sens5 <- fit.mult.impute(DeliveryHealth ~ rcs(DeliveryYear, 5) + rcs(AgeAtDelivery, 5) + rcs(AntenatalVisits, 5) +
+                          rcs(Education, 5) + Scholar + PregnancyPlanned +
+                          ContBeMod + Refugee + ResStatus, lrm, mod3sens5_imp, data = mod3dfsens5, pr = FALSE)
+print(mod3sens5)
+
+# make datadist for plotting
+dd <- datadist(mod3dfsens5)
+options(datadist = 'dd')
+
+# get ORs
+mod3s1s5 <- as_tibble(summary(mod3sens5, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(15, 25), 
+                            AntenatalVisits = c(0, 4), Education = c(0, 7)),
+                    rownames = NA)
+mod3s2s5 <- as_tibble(summary(mod3sens5, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(25, 35), 
+                            AntenatalVisits = c(4, 8), Education = c(7, 12)),
+                    rownames = NA)
+mod3s3s5 <- as_tibble(summary(mod3sens5, DeliveryYear = c(1993, 2004), AgeAtDelivery = c(35, 45), 
+                            AntenatalVisits = c(0, 4), Education = c(7, 12)),
+                    rownames = NA)
+mod3ss5 <- bind_rows(mod3s1s5, mod3s2s5, mod3s3s5) %>% rownames_to_column(., var = "Covariate") %>%
+  distinct(Low, High, Effect, .keep_all = TRUE) %>% column_to_rownames(., var = "Covariate")
+
+# clean up tibble
+mod3ss5rows <- rownames(mod3ss5 %>% filter(Type == 1))
+mod3ss5 <- mod3ss5 %>% filter(Type == 2)
+rownames(mod3ss5) <- mod3ss5rows
+mod3ss5 <- mod3ss5[order(row.names(mod3ss5)), ]
+
+# Make row names nicer
+rownames(mod3ss5) <- c("Age (35 vs. 25)",
+                    "Age (45 vs. 35)",
+                    "Age (25 vs. 15)",
+                    "Antenatal Visits (8 vs. 4)",
+                    "Antenatal Visits (4 vs. 0)",
+                    "Modern Contraceptive Use Prior to Pregnancy",
+                    "Delivery Year (2004 vs. 1993)",
+                    "Delivery Year (2018 vs. 2004)",
+                    "Education (12 vs. 7 Years)",
+                    "Education (7 vs. 0 Years)",
+                    "Other vs. Unintended Pregnancy",
+                    "Intended vs. Unintended Pregnancy",
+                    "Mozambican vs. South African",
+                    "Other Nationality vs. South African",
+                    "Temporary vs. Permanent",
+                    "Other vs. Permanent",
+                    "Current Student vs. Not")
+
+#mod3ss5 %>% select(-S.E., -Type, -Low, -High, -Diff.) %>% kable() %>%
+#  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+#                full_width = FALSE, fixed_thead = TRUE) %>%
+#  scroll_box(width = "800px", height = "500px")
+```
+
+## Antenatal Births Summary
+
+```{r mod1sum, warning=FALSE}
+# Now join all sensitivity analyses together into one table to compare and contrast
+
+mod1s %>% rownames_to_column(., "Name") %>%
+  left_join(., mod1ss1 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>% 
+  left_join(., mod1ss2 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod1ss3 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod1ss4 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod1ss5 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  select(-Low, -High, -Diff., -S.E., -Type) %>% 
+  mutate(`aOR (95% CI)` = paste0(round(Effect.x, 3), " (", 
+                                 round(`Lower 0.95.x`, 3), "-", 
+                                 round(`Upper 0.95.x`, 3), ")"),
+         `aOR (95% CI) ` = paste0(round(Effect.y, 3), " (", 
+                                 round(`Lower 0.95.y`, 3), "-", 
+                                 round(`Upper 0.95.y`, 3), ")"),
+         `aOR (95% CI)  ` = paste0(round(Effect.x.x, 3), " (", 
+                                 round(`Lower 0.95.x.x`, 3), "-", 
+                                 round(`Upper 0.95.x.x`, 3), ")"),
+         `aOR (95% CI)   ` = paste0(round(Effect.y.y, 3), " (", 
+                                 round(`Lower 0.95.y.y`, 3), "-", 
+                                 round(`Upper 0.95.y.y`, 3), ")"),
+         `aOR (95% CI)    ` = paste0(round(Effect.x.x.x, 3), " (", 
+                                 round(`Lower 0.95.x.x.x`, 3), "-", 
+                                 round(`Upper 0.95.x.x.x`, 3), ")"),
+         `aOR (95% CI)     ` = paste0(round(Effect.y.y.y, 3), " (", 
+                                 round(`Lower 0.95.y.y.y`, 3), "-", 
+                                 round(`Upper 0.95.y.y.y`, 3), ")")) %>%
+  select(Name, `aOR (95% CI)`:`aOR (95% CI)     `) %>%
+  column_to_rownames(., "Name") %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE, fixed_thead = TRUE) %>%
+  add_header_above(c(" " = 1, "Primary" = 1, "Sensitivity 1" = 1, "Sensitivity 2" = 1,
+                     "Sensitivity 3" = 1, "Sensitivity 4" = 1, "Sensitivity 5" = 1)) %>%
+  scroll_box(width = "800px", height = "500px")
+
+# forest plot
+mod1s %>% rownames_to_column(., "Name") %>%
+  left_join(., mod1ss1 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>% 
+  left_join(., mod1ss2 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod1ss3 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod1ss4 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod1ss5 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  select(-Low, -High, -Diff., -S.E., -Type) %>% 
+  column_to_rownames(., "Name") %>%
+  mutate(cat = factor(c("Age", "Age", "Age",
+                 "C Hx",
+                 "Birth Yr", "Birth Yr",
+                 "Edu", "Edu",
+                 "P Hx",
+                 "Int", "Int",
+                 "vs. SA", "vs. SA", 
+                 "vs. Res", "vs. Res",
+                 "Stu"),
+                 levels = c("Age",
+                            "C Hx",
+                            "Birth Yr",
+                            "Edu",
+                            "P Hx",
+                            "Int",
+                            "vs. SA",
+                            "vs. Res",
+                            "Stu")),
+         name = c("35 vs. 25", "45 vs. 35", "25 vs. 15",
+                  "Hx Contraceptives",
+                  "2004 vs. 1993", "2018 vs. 2004",
+                  "12 vs. 7", "7 vs. 0",
+                  "Pregnancy Hx",
+                  "Other vs. No", "Yes vs. No",
+                  "Moz", "Other", 
+                  "Mig", "Oth Mig",
+                  "Student vs. Not")) %>%
+  ggplot(aes(y = name)) +
+  # primary analysis
+  geom_point(aes(x = Effect.x, color = "black")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.x`, xmax = `Upper 0.95.x`, color = "black"), 
+                 height = 0.1) +
+  # sensitivity analysis 1
+  geom_point(aes(x = Effect.y, color = "red")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y`, xmax = `Upper 0.95.y`, color = "red"), 
+                 height = 0.1) +
+  # sensitivity analysis 2
+  geom_point(aes(x = Effect.x.x, color = "blue")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.x.x`, xmax = `Upper 0.95.x.x`, color = "blue"), 
+                 height = 0.1) +
+  # sensitivity analysis 3
+  geom_point(aes(x = Effect.y.y, color = "green")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y.y`, xmax = `Upper 0.95.y.y`, color = "green"), 
+                 height = 0.1) +
+  # sensitivity analysis 4
+  geom_point(aes(x = Effect.x.x.x, color = "purple")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.x.x.x`, xmax = `Upper 0.95.x.x.x`, color = "purple"), 
+                 height = 0.1) +
+  # sensitivity analysis 3
+  geom_point(aes(x = Effect.y.y.y, color = "orange")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y.y.y`, xmax = `Upper 0.95.y.y.y`, color = "orange"), 
+                 height = 0.1) +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  ylab("Comparison") + xlab("Adjusted Odds Ratio") +
+  ggtitle("Antenatal Visit Sensitivity Analyses") +
+  facet_grid(cat ~ ., scales = "free", space = "free") +
+  theme_classic() +
+  scale_color_identity(guide = "legend",
+                       name = "Analysis:",
+                       labels = c("Primary",
+                                  "Sensitivity 1",
+                                  "Sensitivity 2",
+                                  "Sensitivity 3",
+                                  "Sensitivity 4",
+                                  "Sensitivity 5")) +
+  guides(color = guide_legend(nrow = 1)) +
+  scale_x_log10() +
+  theme(legend.position = "bottom")
+```
+
+## Skilled Birth Attendant Summary
+
+```{r mod2sum, warnings=FALSE}
+mod2s %>% rownames_to_column(., "Name") %>%
+  left_join(., mod2ss1 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>% 
+  left_join(., mod2ss2 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod2ss3 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod2ss4 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod2ss5 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  select(-Low, -High, -Diff., -S.E., -Type) %>% 
+  mutate(`aOR (95% CI)` = paste0(round(Effect.x, 3), " (", 
+                                 round(`Lower 0.95.x`, 3), "-", 
+                                 round(`Upper 0.95.x`, 3), ")"),
+         `aOR (95% CI) ` = paste0(round(Effect.y, 3), " (", 
+                                 round(`Lower 0.95.y`, 3), "-", 
+                                 round(`Upper 0.95.y`, 3), ")"),
+         `aOR (95% CI)  ` = paste0(round(Effect.x.x, 3), " (", 
+                                 round(`Lower 0.95.x.x`, 3), "-", 
+                                 round(`Upper 0.95.x.x`, 3), ")"),
+         `aOR (95% CI)   ` = paste0(round(Effect.y.y, 3), " (", 
+                                 round(`Lower 0.95.y.y`, 3), "-", 
+                                 round(`Upper 0.95.y.y`, 3), ")"),
+         `aOR (95% CI)    ` = paste0(round(Effect.x.x.x, 3), " (", 
+                                 round(`Lower 0.95.x.x.x`, 3), "-", 
+                                 round(`Upper 0.95.x.x.x`, 3), ")"),
+         `aOR (95% CI)     ` = paste0(round(Effect.y.y.y, 3), " (", 
+                                 round(`Lower 0.95.y.y.y`, 3), "-", 
+                                 round(`Upper 0.95.y.y.y`, 3), ")")) %>%
+  select(Name, `aOR (95% CI)`:`aOR (95% CI)     `) %>%
+  column_to_rownames(., "Name") %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE, fixed_thead = TRUE) %>%
+  add_header_above(c(" " = 1, "Primary" = 1, "Sensitivity 1" = 1, "Sensitivity 2" = 1,
+                     "Sensitivity 3" = 1, "Sensitivity 4" = 1, "Sensitivity 5" = 1)) %>%
+  scroll_box(width = "800px", height = "500px")
+
+# forest plot
+mod2s %>% rownames_to_column(., "Name") %>%
+  left_join(., mod2ss1 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>% 
+  left_join(., mod2ss2 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod2ss3 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod2ss4 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod2ss5 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  select(-Low, -High, -Diff., -S.E., -Type) %>% 
+  column_to_rownames(., "Name") %>%
+  mutate(cat = factor(c("Age", "Age", "Age",
+                        "A Vis", "A Vis",
+                        "C Hx",
+                        "Birth Yr", "Birth Yr",
+                        "Edu", "Edu",
+                        "P Hx",
+                        "Int", "Int",
+                        "vs. SA", "vs. SA",
+                        "vs. Res", "vs. Res",
+                        "Stu"),
+                 levels = c("Age",
+                            "A Vis",
+                            "C Hx",
+                            "Birth Yr",
+                            "Edu",
+                            "P Hx",
+                            "Int",
+                            "vs. SA",
+                            "vs. Res",
+                            "Stu")),
+         name = c("35 vs. 25", "45 vs. 35", "25 vs. 15",
+                  "8 vs. 4", "4 vs. 0",
+                  "Hx Contraceptives",
+                  "2004 vs. 1993", "2018 vs. 2004",
+                  "12 vs. 7", "7 vs. 0",
+                  "Pregnancy Hx",
+                  "Other vs. No", "Yes vs. No",
+                  "Moz", "Other", 
+                  "Mig", "Oth Mig",
+                  "Student vs. Not")) %>%
+  ggplot(aes(y = name)) +
+  # primary analysis
+  geom_point(aes(x = Effect.x, color = "black")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.x`, xmax = `Upper 0.95.x`, color = "black"), 
+                 height = 0.1) +
+  # sensitivity analysis 1
+  geom_point(aes(x = Effect.y, color = "red")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y`, xmax = `Upper 0.95.y`, color = "red"), 
+                 height = 0.1) +
+  # sensitivity analysis 2
+  geom_point(aes(x = Effect.x.x, color = "blue")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.x.x`, xmax = `Upper 0.95.x.x`, color = "blue"), 
+                 height = 0.1) +
+  # sensitivity analysis 3
+  geom_point(aes(x = Effect.y.y, color = "green")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y.y`, xmax = `Upper 0.95.y.y`, color = "green"), 
+                 height = 0.1) +
+  # sensitivity analysis 4
+  geom_point(aes(x = Effect.x.x.x, color = "purple")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.x.x.x`, xmax = `Upper 0.95.x.x.x`, color = "purple"), 
+                 height = 0.1) +
+  # sensitivity analysis 3
+  geom_point(aes(x = Effect.y.y.y, color = "orange")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y.y.y`, xmax = `Upper 0.95.y.y.y`, color = "orange"), 
+                 height = 0.1) +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  ylab("Comparison") + xlab("Adjusted Odds Ratio") +
+  ggtitle("Skilled Birth Attendant Sensitivity Analyses") +
+  facet_grid(cat ~ ., scales = "free", space = "free") +
+  theme_classic() +
+  scale_color_identity(guide = "legend",
+                       name = "Analysis:",
+                       labels = c("Primary",
+                                  "Sensitivity 1",
+                                  "Sensitivity 2",
+                                  "Sensitivity 3",
+                                  "Sensitivity 4",
+                                  "Sensitivity 5")) +
+  guides(color = guide_legend(nrow = 1)) +
+  scale_x_log10() +
+  theme(legend.position = "bottom")
+```
+
+## Health Facility Delivery Summary
+
+```{r mod3sum, warning=FALSE}
+mod3s %>% rownames_to_column(., "Name") %>%
+  left_join(., mod3ss1 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>% 
+  left_join(., mod3ss2 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod3ss3 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod3ss4 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod3ss5 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  select(-Low, -High, -Diff., -S.E., -Type) %>% 
+  mutate(`aOR (95% CI)` = paste0(round(Effect.x, 3), " (", 
+                                 round(`Lower 0.95.x`, 3), "-", 
+                                 round(`Upper 0.95.x`, 3), ")"),
+         `aOR (95% CI) ` = paste0(round(Effect.y, 3), " (", 
+                                 round(`Lower 0.95.y`, 3), "-", 
+                                 round(`Upper 0.95.y`, 3), ")"),
+         `aOR (95% CI)  ` = paste0(round(Effect.x.x, 3), " (", 
+                                 round(`Lower 0.95.x.x`, 3), "-", 
+                                 round(`Upper 0.95.x.x`, 3), ")"),
+         `aOR (95% CI)   ` = paste0(round(Effect.y.y, 3), " (", 
+                                 round(`Lower 0.95.y.y`, 3), "-", 
+                                 round(`Upper 0.95.y.y`, 3), ")"),
+         `aOR (95% CI)    ` = paste0(round(Effect.x.x.x, 3), " (", 
+                                 round(`Lower 0.95.x.x.x`, 3), "-", 
+                                 round(`Upper 0.95.x.x.x`, 3), ")"),
+         `aOR (95% CI)     ` = paste0(round(Effect.y.y.y, 3), " (", 
+                                 round(`Lower 0.95.y.y.y`, 3), "-", 
+                                 round(`Upper 0.95.y.y.y`, 3), ")")) %>%
+  select(Name, `aOR (95% CI)`:`aOR (95% CI)     `) %>%
+  column_to_rownames(., "Name") %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE, fixed_thead = TRUE) %>%
+  add_header_above(c(" " = 1, "Primary" = 1, "Sensitivity 1" = 1, "Sensitivity 2" = 1,
+                     "Sensitivity 3" = 1, "Sensitivity 4" = 1, "Sensitivity 5" = 1)) %>%
+  scroll_box(width = "800px", height = "500px")
+
+# forest plot
+mod3s %>% rownames_to_column(., "Name") %>%
+  left_join(., mod3ss1 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>% 
+  left_join(., mod3ss2 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod3ss3 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod3ss4 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  left_join(., mod3ss5 %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  select(-Low, -High, -Diff., -S.E., -Type) %>% 
+  column_to_rownames(., "Name") %>%
+  mutate(cat = factor(c("Age", "Age", "Age",
+                        "A Vis", "A Vis",
+                        "C Hx",
+                        "Birth Yr", "Birth Yr",
+                        "Edu", "Edu",
+                        "P Hx",
+                        "Int", "Int",
+                        "vs. SA", "vs. SA",
+                        "vs. Res", "vs. Res",
+                        "Stu"),
+                 levels = c("Age",
+                            "A Vis",
+                            "C Hx",
+                            "Birth Yr",
+                            "Edu",
+                            "P Hx",
+                            "Int",
+                            "vs. SA",
+                            "vs. Res",
+                            "Stu")),
+         name = c("35 vs. 25", "45 vs. 35", "25 vs. 15",
+                  "8 vs. 4", "4 vs. 0",
+                  "Hx Contraceptives",
+                  "2004 vs. 1993", "2018 vs. 2004",
+                  "12 vs. 7", "7 vs. 0",
+                  "Pregnancy Hx",
+                  "Other vs. No", "Yes vs. No",
+                  "Moz", "Other", 
+                  "Mig", "Oth Mig",
+                  "Student vs. Not")) %>%
+  ggplot(aes(y = name)) +
+  # primary analysis
+  geom_point(aes(x = Effect.x, color = "black")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.x`, xmax = `Upper 0.95.x`, color = "black"), 
+                 height = 0.1) +
+  # sensitivity analysis 1
+  geom_point(aes(x = Effect.y, color = "red")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y`, xmax = `Upper 0.95.y`, color = "red"), 
+                 height = 0.1) +
+  # sensitivity analysis 2
+  geom_point(aes(x = Effect.x.x, color = "blue")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.x.x`, xmax = `Upper 0.95.x.x`, color = "blue"), 
+                 height = 0.1) +
+  # sensitivity analysis 3
+  geom_point(aes(x = Effect.y.y, color = "green")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y.y`, xmax = `Upper 0.95.y.y`, color = "green"), 
+                 height = 0.1) +
+  # sensitivity analysis 4
+  geom_point(aes(x = Effect.x.x.x, color = "purple")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.x.x.x`, xmax = `Upper 0.95.x.x.x`, color = "purple"), 
+                 height = 0.1) +
+  # sensitivity analysis 3
+  geom_point(aes(x = Effect.y.y.y, color = "orange")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y.y.y`, xmax = `Upper 0.95.y.y.y`, color = "orange"), 
+                 height = 0.1) +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  ylab("Comparison") + xlab("Adjusted Odds Ratio") +
+  ggtitle("Health Facility Delivery Sensitivity Analyses") +
+  facet_grid(cat ~ ., scales = "free", space = "free") +
+  theme_classic() +
+  scale_color_identity(guide = "legend",
+                       name = "Analysis:",
+                       labels = c("Primary",
+                                  "Sensitivity 1",
+                                  "Sensitivity 2",
+                                  "Sensitivity 3",
+                                  "Sensitivity 4",
+                                  "Sensitivity 5")) +
+  scale_x_log10() +
+  guides(color = guide_legend(nrow = 1)) +
+  theme(legend.position = "bottom")
+```
+
+# Session Info
+
+```{r fin}
+# first export dataframes to make figures in analysis.Rmd
+
+# set directory to save data
+setwd("./analysis_R_data")
+
+# descriptive data
+Save(deidentified, "maindf")
+# model 1
+Save(mod1df)
+Save(mod1)
+Save(mod1s) # for summary table
+Save(mod1sfp) # for forest plot
+Save(val1)
+# model 2
+Save(mod2df)
+Save(mod2)
+Save(mod2s)
+Save(mod2sfp) # for forest plot
+Save(val2)
+Save(cal2)
+# model 3
+Save(mod3df)
+Save(mod3) # summary table
+Save(mod3s) # summary table
+Save(mod3sfp) # for forest plot
+Save(val3)
+Save(cal3)
+
+# for forest plots
+Save(mod1s1)
+Save(mod1s2)
+Save(mod1s3)
+Save(mod2s1)
+Save(mod2s2)
+Save(mod2s3)
+Save(mod3s1)
+Save(mod3s2)
+Save(mod3s3)
+
+# sensitivity analyses
+Save(mod1ss1, "mod1sens1")
+Save(mod1ss2, "mod1sens2")
+Save(mod1ss3, "mod1sens3")
+Save(mod1ss4, "mod1sens4")
+Save(mod1ss5, "mod1sens5")
+
+Save(mod2ss1, "mod2sens1")
+Save(mod2ss2, "mod2sens2")
+Save(mod2ss3, "mod2sens3")
+Save(mod2ss4, "mod2sens4")
+Save(mod2ss5, "mod2sens5")
+
+Save(mod3ss1, "mod3sens1")
+Save(mod3ss2, "mod3sens2")
+Save(mod3ss3, "mod3sens3")
+Save(mod3ss4, "mod3sens4")
+Save(mod3ss5, "mod3sens5")
+
+# show packages used
+sessionInfo()
+```
