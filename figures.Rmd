@@ -1334,20 +1334,20 @@ maindf <- maindf %>%
 
 # now make and export three separate tables
 table1::table1(~ as.factor(PregnancyNumber) + AgeAtDelivery + AntenatalVisits +
-                 Education + Scholar + PregnancyPlanned + ContBeMod + ContraceBe +
-                 ContAfMod + ContraceAf + DeliveryPlace + Attendant + 
+                 Education + Scholar + PregnancyPlanned + as.factor(ContBeMod) + ContraceBe +
+                 as.factor(ContAfMod) + ContraceAf + DeliveryPlace + Attendant + 
                  Refugee + ResStatus | mod1, 
                data = maindf, overall = FALSE, 
                render.continuous = c(.="Median [Q1, Q3]"))
 table1::table1(~ as.factor(PregnancyNumber) + AgeAtDelivery + AntenatalVisits +
-                 Education + Scholar + PregnancyPlanned + ContBeMod + ContraceBe +
-                 ContAfMod + ContraceAf + DeliveryPlace + Attendant + 
+                 Education + Scholar + PregnancyPlanned + as.factor(ContBeMod) + ContraceBe +
+                 as.factor(ContAfMod) + ContraceAf + DeliveryPlace + Attendant + 
                  Refugee + ResStatus | mod2, 
                data = maindf, overall = FALSE, 
                render.continuous = c(.="Median [Q1, Q3]"))
 table1::table1(~ as.factor(PregnancyNumber) + AgeAtDelivery + AntenatalVisits +
-                 Education + Scholar + PregnancyPlanned + ContBeMod + ContraceBe +
-                 ContAfMod + ContraceAf + DeliveryPlace + Attendant + 
+                 Education + Scholar + PregnancyPlanned + as.factor(ContBeMod) + ContraceBe +
+                 as.factor(ContAfMod) + ContraceAf + DeliveryPlace + Attendant + 
                  Refugee + ResStatus | mod3, 
                data = maindf, overall = FALSE, 
                render.continuous = c(.="Median [Q1, Q3]"))
