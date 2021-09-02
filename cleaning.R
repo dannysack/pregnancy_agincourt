@@ -12,6 +12,8 @@ births <- read_csv("births.csv")
 pregnancies <- read_csv("pregnancies.csv")
 individuals <- read_csv("individuals.csv")
 resstat <- read_csv("resstat.csv")
+ses <- read_csv("ses.csv")
+ind_ses <- read_csv("individuals_ses.csv")
 
 # pregnancies is my main file, need to add birthweight from the births file based on "Pregnancy" (Id does not match for some reason)
 
@@ -37,6 +39,44 @@ for(i in 1:nrow(individuals)){
 
 # now need to add resstat to rawdata by observation year and Id and remove duplicate rows
 rawdata <- left_join(rawdata, resstat) %>% distinct()
+
+# check years with ses data
+table(ses$Year)
+# 2001, 2003, 2005, 2007, 2009, 2011, 2013:2020
+# see distribution of absolute ses
+hist(ses$SESabs)
+# get a sense of missingness of total SES for later
+table(round(ses$SESabs, 1), useNA = "always")
+# range from 0 to 4.2 with no data missing
+
+# now combine individuals_ses with ses to link absolute SES to individual ID by household ID
+
+# have to, in order
+# 1) Id in rawdata match Id in ind_ses
+# 2) HouseholdId in ind_ses match HousholdID in ses
+# 3) Year in ses match ObsYear in rawdata
+
+# set up blank columns
+rawdata <- rawdata %>% mutate(SESabs = NA)
+
+# loop through columns and match (need to figure out edge cases)
+for(i in 1:nrow(rawdata)){
+  # set Id
+  loopId <- rawdata$Id[i]
+  # subset ind_ses
+  loophousehold <- ind_ses %>% 
+    filter(Id == loopId) %>% 
+    pull(HouseholdId)
+  # find ses for given year
+  loopses <- ses %>% 
+    filter(HouseholdID %in% loophousehold) %>%
+    filter(Year == rawdata$ObsYear[i]) %>% 
+    pull(SESabs)
+  # set as final
+  # if no SES matches, fill as missing (length of vector will be zero)
+  # if more than one household with SES matching individual in a given year, take the mean
+  rawdata$SESabs[i] <- ifelse(length(loopses) == 0, NA, mean(loopses, na.rm = TRUE))
+}
 
 # check how many missing birth dates
 table(rawdata$DoB == "1900-01-01")
@@ -295,7 +335,7 @@ deidentified <- rawdata %>% select(Id, Pregnancy, DeliveryMonth, DeliveryYear, O
                                    PregnancyNumber, OutCome, LiveBorn, StillBorn, Complication, Attendant,
                                    DeliveryPlace, Hospital, ContraceBe, ContraceAf, PregnancyPlanned, 
                                    Scholar, BackToSchool, Education, AntenatalClinic, AntenatalVisits,
-                                   Birthweight, Refugee, ResStatus)
+                                   Birthweight, Refugee, ResStatus, SESabs)
 
 # add labels to columns
 label(deidentified$DeliveryMonth) <- "Delivery Month"
@@ -323,6 +363,7 @@ label(deidentified$Birthweight) <- "Birthweight"
 units(deidentified$Birthweight) <- "kilograms"
 label(deidentified$Refugee) <- "Nationality"
 label(deidentified$ResStatus) <- "Migrant"
+label(deidentified$SESabs) <- "Household Absolute SES"
 
 # save for use in analysis.Rmd
 Save(deidentified)

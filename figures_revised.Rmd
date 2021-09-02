@@ -58,18 +58,21 @@ Load(mod1sens2)
 Load(mod1sens3)
 Load(mod1sens4)
 Load(mod1sens5)
+Load(mod1sensses)
 
 Load(mod2sens1)
 Load(mod2sens2)
 Load(mod2sens3)
 Load(mod2sens4)
 Load(mod2sens5)
+Load(mod2sensses)
 
 Load(mod3sens1)
 Load(mod3sens2)
 Load(mod3sens3)
 Load(mod3sens4)
 Load(mod3sens5)
+Load(mod3sensses)
 ```
 
 # Figures
@@ -100,18 +103,21 @@ fig1 <- grViz("digraph flowchart {
       mod1sens3 [label = '(n = 41,747)']
       mod1sens4 [label = '(n = 28,901)']
       mod1sens5 [label = '(n = 28,176)']
+      mod1sesses [label = '(n = 24,432)']
       mod2 [label = 'Skilled Birth Attendant\\n(n = 48,646)']
       mod2sens1 [label = '(n = 19,239)']
       mod2sens2 [label = '(n = 45,592)']
       mod2sens3 [label = '(n = 47,526)']
       mod2sens4 [label = '(n = 33,723)']
       mod2sens5 [label = '(n = 33,000)']
+      mod2sesses [label = '(n = 25,051)']
       mod3 [label = 'Health Facility Delivery\\n(n = 50,956)']
       mod3sens1 [label = '(n = 20,275)']
       mod3sens2 [label = '(n = 47,787)']
       mod3sens3 [label = '(n = 49,756)']
       mod3sens4 [label = '(n = 35,749)']
       mod3sens5 [label = '(n = 34,960)']
+      mod3sesses [label = '(n = 25,524)']
       primexc [label = 'Missing birth year (n = 53) \\n Pre-1993 births (n = 950) \\n Post-2018 births (n = 1,510) \\n Duplicate recorded births (n = 685) \\n Delivery date on or after observation date (n = 124)']
       sens [label = 'Sensitivity Analyses']
       sens1 [label = 'Births < 6 months before observation date\\n(n = 20,406)']
@@ -119,6 +125,7 @@ fig1 <- grViz("digraph flowchart {
       sens3 [label = 'Full singleton births\\n(n = 50,138)']
       sens4 [label = 'First recorded births\\n(n = 36,008)']
       sens5 [label = 'Full singleton first recorded births\\n(n = 35,207)']
+      sensses [label = 'Socioeconomic status recorded\\n(n = 25,711)']
       
       # dummy nodes
       node [shape=none, width=0, height=0, label='']
@@ -134,18 +141,19 @@ fig1 <- grViz("digraph flowchart {
       
       edge[dir = none]
       all -> n1
-      sens -> sens1 -> sens2 -> sens3 -> sens4 -> sens5
-      mod1 -> mod1sens1 -> mod1sens2 -> mod1sens3 -> mod1sens4 -> mod1sens5
-      mod2 -> mod2sens1 -> mod2sens2 -> mod2sens3 -> mod2sens4 -> mod2sens5
-      mod3 -> mod3sens1 -> mod3sens2 -> mod3sens3 -> mod3sens4 -> mod3sens5
+      sens -> sens1 -> sens2 -> sens3 -> sens4 -> sens5 -> sensses
+      mod1 -> mod1sens1 -> mod1sens2 -> mod1sens3 -> mod1sens4 -> mod1sens5 -> mod1sesses
+      mod2 -> mod2sens1 -> mod2sens2 -> mod2sens3 -> mod2sens4 -> mod2sens5 -> mod2sesses
+      mod3 -> mod3sens1 -> mod3sens2 -> mod3sens3 -> mod3sens4 -> mod3sens5 -> mod3sesses
       {rank = same; sens1; mod1sens1; mod2sens1; mod3sens1}
       {rank = same; sens2; mod1sens2; mod2sens2; mod3sens2}
       {rank = same; sens3; mod1sens3; mod2sens3; mod3sens3}
       {rank = same; sens4; mod1sens4; mod2sens4; mod3sens4}
       {rank = same; sens5; mod1sens5; mod2sens5; mod3sens5}
+      {rank = same; sensses; mod1sens; mod2sensses; mod3sensses}
       }
       ",
-      width = 600, height = 600)
+      width = 600, height = 650)
 
 # export
 fig1 %>% 
@@ -288,7 +296,7 @@ fig2 <- ggarrange(ant_per, loc_per,
           hjust = -0.05, vjust = 1.25)
 
 fig2
-ggsave("./figures_rev/fig2.pdf", width = 20, height = 15)
+ggsave("./figures_rev/fig2.pdf", width = 10, height = 8)
 embed_fonts("./figures_rev/fig2.pdf")
 ```
 
@@ -801,7 +809,7 @@ supfig4
 
 ## Supplemental Figure 5: Sensitivity Analyses Forest Plots
 
-```{r supfig5, fig.height=14, fig.width=7, warning=FALSE}
+```{r supfig5, fig.height=20, fig.width=10, warning=FALSE}
 # create forest plots of sensitivity analyses for easier visual contrast
 # one figure for each model
 supfig2mod1 <- mod1s %>% rownames_to_column(., "Name") %>%
@@ -815,6 +823,8 @@ supfig2mod1 <- mod1s %>% rownames_to_column(., "Name") %>%
             by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
   left_join(., mod1sens5 %>% rownames_to_column(., "Name"), 
             by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  full_join(., mod1sensses %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
   select(-Low, -High, -Diff., -S.E., -Type) %>% 
   column_to_rownames(., "Name") %>%
   mutate(cat = factor(c("Age", "Age", "Age",
@@ -825,7 +835,8 @@ supfig2mod1 <- mod1s %>% rownames_to_column(., "Name") %>%
                         "Int", "Int",
                         "vs.SA", "vs.SA", 
                         "vs.Per", "vs.Per",
-                        "St"),
+                        "St",
+                        "SES"),
                  levels = c("Age",
                             "CH",
                             "BYr",
@@ -834,7 +845,8 @@ supfig2mod1 <- mod1s %>% rownames_to_column(., "Name") %>%
                             "Int",
                             "vs.SA",
                             "vs.Per",
-                            "St")),
+                            "St",
+                            "SES")),
          name = c("35 vs. 25", "45 vs. 35", "25 vs. 15",
                   "Hx Contraceptives",
                   "2004 vs. 1993", "2018 vs. 2004",
@@ -843,31 +855,36 @@ supfig2mod1 <- mod1s %>% rownames_to_column(., "Name") %>%
                   "Other vs. No", "Yes vs. No",
                   "Moz", "Other", 
                   "Temp", "Other",
-                  "Student vs. Not")) %>%
+                  "Student vs. Not", 
+                  "SES")) %>%
   ggplot(aes(y = name)) +
   # primary analysis
   geom_point(aes(x = Effect.x, color = "black")) +
   geom_errorbarh(aes(xmin = `Lower 0.95.x`, xmax = `Upper 0.95.x`, color = "black"), 
                  height = 0.1) +
   # sensitivity analysis 1
-  geom_point(aes(x = Effect.y, color = "red")) +
-  geom_errorbarh(aes(xmin = `Lower 0.95.y`, xmax = `Upper 0.95.y`, color = "red"), 
+  geom_point(aes(x = Effect.y, color = "blue")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y`, xmax = `Upper 0.95.y`, color = "blue"), 
                  height = 0.1) +
   # sensitivity analysis 2
-  geom_point(aes(x = Effect.x.x, color = "blue")) +
-  geom_errorbarh(aes(xmin = `Lower 0.95.x.x`, xmax = `Upper 0.95.x.x`, color = "blue"), 
+  geom_point(aes(x = Effect.x.x, color = "green")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.x.x`, xmax = `Upper 0.95.x.x`, color = "green"), 
                  height = 0.1) +
   # sensitivity analysis 3
-  geom_point(aes(x = Effect.y.y, color = "green")) +
-  geom_errorbarh(aes(xmin = `Lower 0.95.y.y`, xmax = `Upper 0.95.y.y`, color = "green"), 
+  geom_point(aes(x = Effect.y.y, color = "grey50")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y.y`, xmax = `Upper 0.95.y.y`, color = "grey50"), 
                  height = 0.1) +
   # sensitivity analysis 4
-  geom_point(aes(x = Effect.x.x.x, color = "purple")) +
-  geom_errorbarh(aes(xmin = `Lower 0.95.x.x.x`, xmax = `Upper 0.95.x.x.x`, color = "purple"), 
+  geom_point(aes(x = Effect.x.x.x, color = "orange")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.x.x.x`, xmax = `Upper 0.95.x.x.x`, color = "orange"), 
                  height = 0.1) +
-  # sensitivity analysis 3
-  geom_point(aes(x = Effect.y.y.y, color = "orange")) +
-  geom_errorbarh(aes(xmin = `Lower 0.95.y.y.y`, xmax = `Upper 0.95.y.y.y`, color = "orange"), 
+  # sensitivity analysis 5
+  geom_point(aes(x = Effect.y.y.y, color = "purple")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y.y.y`, xmax = `Upper 0.95.y.y.y`, color = "purple"), 
+                 height = 0.1) +
+  # sensitivity analysis ses
+  geom_point(aes(x = Effect, color = "red")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95`, xmax = `Upper 0.95`, color = "red"), 
                  height = 0.1) +
   geom_vline(xintercept = 1, linetype = "dashed") +
   ylab("") + xlab("Adjusted Odds Ratio") +
@@ -882,7 +899,8 @@ supfig2mod1 <- mod1s %>% rownames_to_column(., "Name") %>%
                                   "Sensitivity 2",
                                   "Sensitivity 3",
                                   "Sensitivity 4",
-                                  "Sensitivity 5")) +
+                                  "Sensitivity 5",
+                                  "SES Sensitivity")) +
   guides(color = guide_legend(nrow = 2)) +
   scale_x_log10() +
   theme(legend.position = "bottom")
@@ -898,6 +916,8 @@ supfig2mod2 <- mod2s %>% rownames_to_column(., "Name") %>%
             by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
   left_join(., mod2sens5 %>% rownames_to_column(., "Name"), 
             by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  full_join(., mod2sensses %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
   select(-Low, -High, -Diff., -S.E., -Type) %>% 
   column_to_rownames(., "Name") %>%
   mutate(cat = factor(c("Age", "Age", "Age",
@@ -909,7 +929,8 @@ supfig2mod2 <- mod2s %>% rownames_to_column(., "Name") %>%
                         "Int", "Int",
                         "vs.SA", "vs.SA", 
                         "vs.Per", "vs.Per",
-                        "St"),
+                        "St",
+                        "SES"),
                  levels = c("Age",
                             "AV",
                             "CH",
@@ -919,7 +940,8 @@ supfig2mod2 <- mod2s %>% rownames_to_column(., "Name") %>%
                             "Int",
                             "vs.SA",
                             "vs.Per",
-                            "St")),
+                            "St",
+                            "SES")),
          name = c("35 vs. 25", "45 vs. 35", "25 vs. 15",
                   "8 vs. 4", "4 vs. 0",
                   "Hx Contraceptives",
@@ -929,31 +951,36 @@ supfig2mod2 <- mod2s %>% rownames_to_column(., "Name") %>%
                   "Other vs. No", "Yes vs. No",
                   "Moz", "Other", 
                   "Temp", "Other",
-                  "Student vs. Not")) %>%
+                  "Student vs. Not", 
+                  "SES")) %>%
   ggplot(aes(y = name)) +
   # primary analysis
   geom_point(aes(x = Effect.x, color = "black")) +
   geom_errorbarh(aes(xmin = `Lower 0.95.x`, xmax = `Upper 0.95.x`, color = "black"), 
                  height = 0.1) +
   # sensitivity analysis 1
-  geom_point(aes(x = Effect.y, color = "red")) +
-  geom_errorbarh(aes(xmin = `Lower 0.95.y`, xmax = `Upper 0.95.y`, color = "red"), 
+  geom_point(aes(x = Effect.y, color = "blue")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y`, xmax = `Upper 0.95.y`, color = "blue"), 
                  height = 0.1) +
   # sensitivity analysis 2
-  geom_point(aes(x = Effect.x.x, color = "blue")) +
-  geom_errorbarh(aes(xmin = `Lower 0.95.x.x`, xmax = `Upper 0.95.x.x`, color = "blue"), 
+  geom_point(aes(x = Effect.x.x, color = "green")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.x.x`, xmax = `Upper 0.95.x.x`, color = "green"), 
                  height = 0.1) +
   # sensitivity analysis 3
-  geom_point(aes(x = Effect.y.y, color = "green")) +
-  geom_errorbarh(aes(xmin = `Lower 0.95.y.y`, xmax = `Upper 0.95.y.y`, color = "green"), 
+  geom_point(aes(x = Effect.y.y, color = "grey50")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y.y`, xmax = `Upper 0.95.y.y`, color = "grey50"), 
                  height = 0.1) +
   # sensitivity analysis 4
-  geom_point(aes(x = Effect.x.x.x, color = "purple")) +
-  geom_errorbarh(aes(xmin = `Lower 0.95.x.x.x`, xmax = `Upper 0.95.x.x.x`, color = "purple"), 
+  geom_point(aes(x = Effect.x.x.x, color = "orange")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.x.x.x`, xmax = `Upper 0.95.x.x.x`, color = "orange"), 
                  height = 0.1) +
-  # sensitivity analysis 3
-  geom_point(aes(x = Effect.y.y.y, color = "orange")) +
-  geom_errorbarh(aes(xmin = `Lower 0.95.y.y.y`, xmax = `Upper 0.95.y.y.y`, color = "orange"), 
+  # sensitivity analysis 5
+  geom_point(aes(x = Effect.y.y.y, color = "purple")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y.y.y`, xmax = `Upper 0.95.y.y.y`, color = "purple"), 
+                 height = 0.1) +
+  # sensitivity analysis ses
+  geom_point(aes(x = Effect, color = "red")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95`, xmax = `Upper 0.95`, color = "red"), 
                  height = 0.1) +
   geom_vline(xintercept = 1, linetype = "dashed") +
   ylab("") + xlab("Adjusted Odds Ratio") +
@@ -968,9 +995,10 @@ supfig2mod2 <- mod2s %>% rownames_to_column(., "Name") %>%
                                   "Sensitivity 2",
                                   "Sensitivity 3",
                                   "Sensitivity 4",
-                                  "Sensitivity 5")) +
-  scale_x_log10() +
+                                  "Sensitivity 5",
+                                  "SES Sensitivity")) +
   guides(color = guide_legend(nrow = 2)) +
+  scale_x_log10() +
   theme(legend.position = "bottom")
 
 supfig2mod3 <- mod3s %>% rownames_to_column(., "Name") %>%
@@ -984,6 +1012,8 @@ supfig2mod3 <- mod3s %>% rownames_to_column(., "Name") %>%
             by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
   left_join(., mod3sens5 %>% rownames_to_column(., "Name"), 
             by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
+  full_join(., mod2sensses %>% rownames_to_column(., "Name"), 
+            by = c("Name", "Low", "High", "Diff.", "S.E.", "Type"))  %>%
   select(-Low, -High, -Diff., -S.E., -Type) %>% 
   column_to_rownames(., "Name") %>%
   mutate(cat = factor(c("Age", "Age", "Age",
@@ -995,7 +1025,8 @@ supfig2mod3 <- mod3s %>% rownames_to_column(., "Name") %>%
                         "Int", "Int",
                         "vs.SA", "vs.SA", 
                         "vs.Per", "vs.Per",
-                        "St"),
+                        "St",
+                        "SES"),
                  levels = c("Age",
                             "AV",
                             "CH",
@@ -1005,7 +1036,8 @@ supfig2mod3 <- mod3s %>% rownames_to_column(., "Name") %>%
                             "Int",
                             "vs.SA",
                             "vs.Per",
-                            "St")),
+                            "St",
+                            "SES")),
          name = c("35 vs. 25", "45 vs. 35", "25 vs. 15",
                   "8 vs. 4", "4 vs. 0",
                   "Hx Contraceptives",
@@ -1015,31 +1047,36 @@ supfig2mod3 <- mod3s %>% rownames_to_column(., "Name") %>%
                   "Other vs. No", "Yes vs. No",
                   "Moz", "Other", 
                   "Temp", "Other",
-                  "Student vs. Not")) %>%
+                  "Student vs. Not", 
+                  "SES")) %>%
   ggplot(aes(y = name)) +
   # primary analysis
   geom_point(aes(x = Effect.x, color = "black")) +
   geom_errorbarh(aes(xmin = `Lower 0.95.x`, xmax = `Upper 0.95.x`, color = "black"), 
                  height = 0.1) +
   # sensitivity analysis 1
-  geom_point(aes(x = Effect.y, color = "red")) +
-  geom_errorbarh(aes(xmin = `Lower 0.95.y`, xmax = `Upper 0.95.y`, color = "red"), 
+  geom_point(aes(x = Effect.y, color = "blue")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y`, xmax = `Upper 0.95.y`, color = "blue"), 
                  height = 0.1) +
   # sensitivity analysis 2
-  geom_point(aes(x = Effect.x.x, color = "blue")) +
-  geom_errorbarh(aes(xmin = `Lower 0.95.x.x`, xmax = `Upper 0.95.x.x`, color = "blue"), 
+  geom_point(aes(x = Effect.x.x, color = "green")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.x.x`, xmax = `Upper 0.95.x.x`, color = "green"), 
                  height = 0.1) +
   # sensitivity analysis 3
-  geom_point(aes(x = Effect.y.y, color = "green")) +
-  geom_errorbarh(aes(xmin = `Lower 0.95.y.y`, xmax = `Upper 0.95.y.y`, color = "green"), 
+  geom_point(aes(x = Effect.y.y, color = "grey50")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y.y`, xmax = `Upper 0.95.y.y`, color = "grey50"), 
                  height = 0.1) +
   # sensitivity analysis 4
-  geom_point(aes(x = Effect.x.x.x, color = "purple")) +
-  geom_errorbarh(aes(xmin = `Lower 0.95.x.x.x`, xmax = `Upper 0.95.x.x.x`, color = "purple"), 
+  geom_point(aes(x = Effect.x.x.x, color = "orange")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.x.x.x`, xmax = `Upper 0.95.x.x.x`, color = "orange"), 
                  height = 0.1) +
-  # sensitivity analysis 3
-  geom_point(aes(x = Effect.y.y.y, color = "orange")) +
-  geom_errorbarh(aes(xmin = `Lower 0.95.y.y.y`, xmax = `Upper 0.95.y.y.y`, color = "orange"), 
+  # sensitivity analysis 5
+  geom_point(aes(x = Effect.y.y.y, color = "purple")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95.y.y.y`, xmax = `Upper 0.95.y.y.y`, color = "purple"), 
+                 height = 0.1) +
+  # sensitivity analysis ses
+  geom_point(aes(x = Effect, color = "red")) +
+  geom_errorbarh(aes(xmin = `Lower 0.95`, xmax = `Upper 0.95`, color = "red"), 
                  height = 0.1) +
   geom_vline(xintercept = 1, linetype = "dashed") +
   ylab("") + xlab("Adjusted Odds Ratio") +
@@ -1054,9 +1091,10 @@ supfig2mod3 <- mod3s %>% rownames_to_column(., "Name") %>%
                                   "Sensitivity 2",
                                   "Sensitivity 3",
                                   "Sensitivity 4",
-                                  "Sensitivity 5")) +
-  scale_x_log10() +
+                                  "Sensitivity 5",
+                                  "SES Sensitivity")) +
   guides(color = guide_legend(nrow = 2)) +
+  scale_x_log10() +
   theme(legend.position = "bottom")
 
 supfig2 <- ggarrange(supfig2mod1, supfig2mod2, supfig2mod3, ncol = 1,
@@ -1143,33 +1181,50 @@ mod1s1tab <- mod1sens1 %>%
   mutate(Mod1s1 = paste0(round(Effect, 2), 
                        " (", round(`Lower 0.95`, 2), 
                        ", ", round(`Upper 0.95`, 2), ")")) %>%
-  select(Mod1s1)
+  select(Mod1s1) %>%
+  add_row(Mod1s1 = NA, .after = 16)
 mod1s2tab <- mod1sens2 %>% 
   mutate(Mod1s2 = paste0(round(Effect, 2), 
                        " (", round(`Lower 0.95`, 2), 
                        ", ", round(`Upper 0.95`, 2), ")")) %>%
-  select(Mod1s2)
+  select(Mod1s2) %>%
+  add_row(Mod1s2 = NA, .after = 16)
 mod1s3tab <- mod1sens3 %>% 
   mutate(Mod1s3 = paste0(round(Effect, 2), 
                        " (", round(`Lower 0.95`, 2), 
                        ", ", round(`Upper 0.95`, 2), ")")) %>%
-  select(Mod1s3)
+  select(Mod1s3) %>%
+  add_row(Mod1s3 = NA, .after = 16)
 mod1s4tab <- mod1sens4 %>% 
   mutate(Mod1s4 = paste0(round(Effect, 2), 
                        " (", round(`Lower 0.95`, 2), 
                        ", ", round(`Upper 0.95`, 2), ")")) %>%
-  select(Mod1s4) %>% add_row(Mod1s4 = NA, .after = 8)
+  select(Mod1s4) %>% add_row(Mod1s4 = NA, .after = 8) %>%
+  add_row(Mod1s4 = NA, .after = 16)
 mod1s5tab <- mod1sens5 %>% 
   mutate(Mod1s5 = paste0(round(Effect, 2), 
                        " (", round(`Lower 0.95`, 2), 
                        ", ", round(`Upper 0.95`, 2), ")")) %>%
-  select(Mod1s5) %>% add_row(Mod1s5 = NA, .after = 8)
+  select(Mod1s5) %>% add_row(Mod1s5 = NA, .after = 8) %>%
+  add_row(Mod1s5 = NA, .after = 16)
+mod1sstab <- mod1sensses %>% 
+  mutate(Mod1ss = paste0(round(Effect, 2), 
+                       " (", round(`Lower 0.95`, 2), 
+                       ", ", round(`Upper 0.95`, 2), ")")) %>%
+  select(Mod1ss) %>% add_row(Mod1ss = NA, .after = 4)
+
+# need to update all with row for SES data
+mod1tab <- mod1tab %>% add_row(Mod1 = NA, .after = 16)
+rownames(mod1tab)[17] <- "Absolute Household Socioeconomic Status"
 
 # need to update rownames
+rownames(mod1s1tab) <- rownames(mod1tab)
+rownames(mod1s2tab) <- rownames(mod1tab)
+rownames(mod1s3tab) <- rownames(mod1tab)
 rownames(mod1s4tab) <- rownames(mod1tab)
 rownames(mod1s5tab) <- rownames(mod1tab)
 
-write.csv(cbind(mod1tab, mod1s1tab, mod1s2tab, mod1s3tab, mod1s4tab, mod1s5tab), 
+write.csv(cbind(mod1tab, mod1s1tab, mod1s2tab, mod1s3tab, mod1s4tab, mod1s5tab, mod1sstab), 
           "./tabs/suptab8.csv", row.names = TRUE)
 
 # suptab8
@@ -1177,33 +1232,50 @@ mod2s1tab <- mod2sens1 %>%
   mutate(Mod2s1 = paste0(round(Effect, 2), 
                        " (", round(`Lower 0.95`, 2), 
                        ", ", round(`Upper 0.95`, 2), ")")) %>%
-  select(Mod2s1)
+  select(Mod2s1) %>%
+  add_row(Mod2s1 = NA, .after = 18)
 mod2s2tab <- mod2sens2 %>% 
   mutate(Mod2s2 = paste0(round(Effect, 2), 
                        " (", round(`Lower 0.95`, 2), 
                        ", ", round(`Upper 0.95`, 2), ")")) %>%
-  select(Mod2s2)
+  select(Mod2s2) %>%
+  add_row(Mod2s2 = NA, .after = 18)
 mod2s3tab <- mod2sens3 %>% 
   mutate(Mod2s3 = paste0(round(Effect, 2), 
                        " (", round(`Lower 0.95`, 2), 
                        ", ", round(`Upper 0.95`, 2), ")")) %>%
-  select(Mod2s3)
+  select(Mod2s3) %>%
+  add_row(Mod2s3 = NA, .after = 18)
 mod2s4tab <- mod2sens4 %>% 
   mutate(Mod2s4 = paste0(round(Effect, 2), 
                        " (", round(`Lower 0.95`, 2), 
                        ", ", round(`Upper 0.95`, 2), ")")) %>%
-  select(Mod2s4) %>% add_row(Mod2s4 = NA, .after = 10)
+  select(Mod2s4) %>% add_row(Mod2s4 = NA, .after = 10) %>%
+  add_row(Mod2s4 = NA, .after = 18)
 mod2s5tab <- mod2sens5 %>% 
   mutate(Mod2s5 = paste0(round(Effect, 2), 
                        " (", round(`Lower 0.95`, 2), 
                        ", ", round(`Upper 0.95`, 2), ")")) %>%
-  select(Mod2s5) %>% add_row(Mod2s5 = NA, .after = 10)
+  select(Mod2s5) %>% add_row(Mod2s5 = NA, .after = 10) %>%
+  add_row(Mod2s5 = NA, .after = 18)
+mod2sstab <- mod2sensses %>% 
+  mutate(Mod2ss = paste0(round(Effect, 2), 
+                       " (", round(`Lower 0.95`, 2), 
+                       ", ", round(`Upper 0.95`, 2), ")")) %>%
+  select(Mod2ss) %>% add_row(Mod2ss = NA, .after = 6)
+
+# need to update all with row for SES data
+mod2tab <- mod2tab %>% add_row(Mod2 = NA, .after = 18)
+rownames(mod2tab)[19] <- "Absolute Household Socioeconomic Status"
 
 # need to update rownames
+rownames(mod2s1tab) <- rownames(mod2tab)
+rownames(mod2s2tab) <- rownames(mod2tab)
+rownames(mod2s3tab) <- rownames(mod2tab)
 rownames(mod2s4tab) <- rownames(mod2tab)
 rownames(mod2s5tab) <- rownames(mod2tab)
 
-write.csv(cbind(mod2tab, mod2s1tab, mod2s2tab, mod2s3tab, mod2s4tab, mod2s5tab), 
+write.csv(cbind(mod2tab, mod2s1tab, mod2s2tab, mod2s3tab, mod2s4tab, mod2s5tab, mod2sstab), 
           "./tabs/suptab9.csv", row.names = TRUE)
 
 # suptab9
@@ -1211,32 +1283,49 @@ mod3s1tab <- mod3sens1 %>%
   mutate(Mod3s1 = paste0(round(Effect, 2), 
                        " (", round(`Lower 0.95`, 2), 
                        ", ", round(`Upper 0.95`, 2), ")")) %>%
-  select(Mod3s1)
+  select(Mod3s1) %>%
+  add_row(Mod3s1 = NA, .after = 18)
 mod3s2tab <- mod3sens2 %>% 
   mutate(Mod3s2 = paste0(round(Effect, 2), 
                        " (", round(`Lower 0.95`, 2), 
                        ", ", round(`Upper 0.95`, 2), ")")) %>%
-  select(Mod3s2)
+  select(Mod3s2) %>%
+  add_row(Mod3s2 = NA, .after = 18)
 mod3s3tab <- mod3sens3 %>% 
   mutate(Mod3s3 = paste0(round(Effect, 2), 
                        " (", round(`Lower 0.95`, 2), 
                        ", ", round(`Upper 0.95`, 2), ")")) %>%
-  select(Mod3s3)
+  select(Mod3s3) %>%
+  add_row(Mod3s3 = NA, .after = 18)
 mod3s4tab <- mod3sens4 %>% 
   mutate(Mod3s4 = paste0(round(Effect, 2), 
                        " (", round(`Lower 0.95`, 2), 
                        ", ", round(`Upper 0.95`, 2), ")")) %>%
-  select(Mod3s4) %>% add_row(Mod3s4 = NA, .after = 10)
+  select(Mod3s4) %>% add_row(Mod3s4 = NA, .after = 10) %>%
+  add_row(Mod3s4 = NA, .after = 18)
 mod3s5tab <- mod3sens5 %>% 
   mutate(Mod3s5 = paste0(round(Effect, 2), 
                        " (", round(`Lower 0.95`, 2), 
                        ", ", round(`Upper 0.95`, 2), ")")) %>%
-  select(Mod3s5) %>% add_row(Mod3s5 = NA, .after = 10)
+  select(Mod3s5) %>% add_row(Mod3s5 = NA, .after = 10) %>%
+  add_row(Mod3s5 = NA, .after = 18)
+mod3sstab <- mod3sensses %>% 
+  mutate(Mod3ss = paste0(round(Effect, 2), 
+                       " (", round(`Lower 0.95`, 2), 
+                       ", ", round(`Upper 0.95`, 2), ")")) %>%
+  select(Mod3ss) %>% add_row(Mod3ss = NA, .after = 6)
+
+# need to update all with row for SES data
+mod3tab <- mod3tab %>% add_row(Mod3 = NA, .after = 18)
+rownames(mod3tab)[19] <- "Absolute Household Socioeconomic Status"
 
 # need to update rownames
+rownames(mod3s1tab) <- rownames(mod3tab)
+rownames(mod3s2tab) <- rownames(mod3tab)
+rownames(mod3s3tab) <- rownames(mod3tab)
 rownames(mod3s4tab) <- rownames(mod3tab)
 rownames(mod3s5tab) <- rownames(mod3tab)
 
-write.csv(cbind(mod3tab, mod3s1tab, mod3s2tab, mod3s3tab, mod3s4tab, mod3s5tab), 
+write.csv(cbind(mod3tab, mod3s1tab, mod3s2tab, mod3s3tab, mod3s4tab, mod3s5tab, mod3sstab), 
           "./tabs/suptab10.csv", row.names = TRUE)
 ```

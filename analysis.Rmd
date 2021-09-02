@@ -3042,6 +3042,183 @@ mod3s %>% rownames_to_column(., "Name") %>%
   theme(legend.position = "bottom")
 ```
 
+# Post hoc Sensititivey Analysis (SES)
+
+### Antenatal Visits
+
+```{r mod1sensses}
+# relevant delivery years
+sesyrs <- c(2001, 2003, 2005, 2007, 2009, 2011, 2013:2018)
+
+# impute data
+mod1dfsensses <- mod1df %>% filter(DeliveryYear %in% sesyrs)
+mod1sensses_imp <- aregImpute(~ DeliveryYear + AgeAtDelivery + Education + 
+                         PregnancyNumber + Scholar + PregnancyPlanned + 
+                         ContBeMod + Refugee + ResStatus + SESabs, data = mod1dfsensses, n.impute = 10, nk = 4, pr = FALSE)
+
+# run model
+mod1sensses <- fit.mult.impute(AntenatalVisits ~ rcs(DeliveryYear, 5) + rcs(AgeAtDelivery, 5) +
+                          rcs(Education, 5) + PregnancyNumber + Scholar + PregnancyPlanned +
+                          ContBeMod + Refugee + ResStatus + SESabs, orm, mod1sensses_imp, data = mod1dfsensses, pr = FALSE)
+print(mod1sensses)
+
+# make datadist for plotting
+dd <- datadist(mod1dfsensses)
+options(datadist = 'dd')
+
+# get ORs
+mod1s1ss <- as_tibble(summary(mod1sensses, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(15, 25), Education = c(0, 7), SESabs = c(1, 2)),
+                    rownames = NA)
+mod1s2ss <- as_tibble(summary(mod1sensses, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(25, 35), Education = c(7, 12), SESabs = c(1, 2)),
+                    rownames = NA)
+mod1s3ss <- as_tibble(summary(mod1sensses, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(35, 45), Education = c(7, 12), SESabs = c(1, 2)),
+                    rownames = NA)
+mod1sss <- bind_rows(mod1s1ss, mod1s2ss, mod1s3ss) %>% rownames_to_column(., var = "Covariate") %>%
+  distinct(Low, High, Effect, .keep_all = TRUE) %>% column_to_rownames(., var = "Covariate")
+
+# clean up tibble
+mod1sssrows <- rownames(mod1sss %>% filter(Type == 1))
+mod1sss <- mod1sss %>% filter(Type == 2)
+rownames(mod1sss) <- mod1sssrows
+mod1sss <- mod1sss[order(row.names(mod1sss)), ]
+
+# Make row names nicer
+rownames(mod1sss) <- c("Age (35 vs. 25)",
+                    "Age (45 vs. 35)",
+                    "Age (25 vs. 15)",
+                    "Modern Contraceptive Use Prior to Pregnancy",
+                    "Delivery Year (2018 vs. 2004)",
+                    "Education (12 vs. 7 Years)",
+                    "Education (7 vs. 0 Years)",
+                    "Previous Pregnancies",
+                    "Other vs. Unintended Pregnancy",
+                    "Intended vs. Unintended Pregnancy",
+                    "Mozambican vs. South African",
+                    "Other Nationality vs. South African",
+                    "Temporary vs. Permanent",
+                    "Other vs. Permanent",
+                    "Current Student vs. Not",
+                    "Absolute Household Socioeconomic Status")
+```
+
+### Skilled Birth Attendant
+
+```{r mod2sensses}
+# impute data
+mod2dfsensses <- mod2df %>% filter(DeliveryYear %in% sesyrs)
+mod2sensses_imp <- aregImpute(~ DeliveryYear + AgeAtDelivery + AntenatalVisits + Education + 
+                         PregnancyNumber + Scholar + PregnancyPlanned + 
+                         ContBeMod + Refugee + ResStatus + SESabs, data = mod2dfsensses, n.impute = 10, nk = 4, pr = FALSE)
+
+# run model
+mod2sensses <- fit.mult.impute(ModAtt ~ rcs(DeliveryYear, 5) + rcs(AgeAtDelivery, 5) + rcs(AntenatalVisits, 5) +
+                          rcs(Education, 5) + PregnancyNumber + Scholar + PregnancyPlanned +
+                          ContBeMod + Refugee + ResStatus + SESabs, lrm, mod2sensses_imp, data = mod2dfsensses, pr = FALSE)
+print(mod2sensses)
+
+# make datadist for plotting
+dd <- datadist(mod2dfsensses)
+options(datadist = 'dd')
+
+# get ORs
+mod2s1ss <- as_tibble(summary(mod2sensses, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(15, 25), AntenatalVisits = c(0, 4),
+                              Education = c(0, 7), SESabs = c(1, 2)),
+                    rownames = NA)
+mod2s2ss <- as_tibble(summary(mod2sensses, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(25, 35), AntenatalVisits = c(4, 8),
+                              Education = c(7, 12), SESabs = c(1, 2)),
+                    rownames = NA)
+mod2s3ss <- as_tibble(summary(mod2sensses, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(35, 45), AntenatalVisits = c(0, 4),
+                              Education = c(7, 12), SESabs = c(1, 2)),
+                    rownames = NA)
+mod2sss <- bind_rows(mod2s1ss, mod2s2ss, mod2s3ss) %>% rownames_to_column(., var = "Covariate") %>%
+  distinct(Low, High, Effect, .keep_all = TRUE) %>% column_to_rownames(., var = "Covariate")
+
+# clean up tibble
+mod2sssrows <- rownames(mod2sss %>% filter(Type == 1))
+mod2sss <- mod2sss %>% filter(Type == 2)
+rownames(mod2sss) <- mod2sssrows
+mod2sss <- mod2sss[order(row.names(mod2sss)), ]
+
+# Make row names nicer
+rownames(mod2sss) <- c("Age (35 vs. 25)",
+                    "Age (45 vs. 35)",
+                    "Age (25 vs. 15)",
+                    "Antenatal Visits (8 vs. 4)",
+                    "Antenatal Visits (4 vs. 0)",
+                    "Modern Contraceptive Use Prior to Pregnancy",
+                    "Delivery Year (2018 vs. 2004)",
+                    "Education (12 vs. 7 Years)",
+                    "Education (7 vs. 0 Years)",
+                    "Previous Pregnancies",
+                    "Other vs. Unintended Pregnancy",
+                    "Intended vs. Unintended Pregnancy",
+                    "Mozambican vs. South African",
+                    "Other Nationality vs. South African",
+                    "Temporary vs. Permanent",
+                    "Other vs. Permanent",
+                    "Current Student vs. Not",
+                    "Absolute Household Socioeconomic Status")
+```
+
+### Health Facility Delivery
+
+```{r mod3sensses}
+# impute data
+mod3dfsensses <- mod3df %>% filter(DeliveryYear %in% sesyrs)
+mod3sensses_imp <- aregImpute(~ DeliveryYear + AgeAtDelivery + AntenatalVisits + Education + 
+                         PregnancyNumber + Scholar + PregnancyPlanned + 
+                         ContBeMod + Refugee + ResStatus + SESabs, data = mod3dfsensses, n.impute = 10, nk = 4, pr = FALSE)
+
+# run model
+mod3sensses <- fit.mult.impute(DeliveryHealth ~ rcs(DeliveryYear, 5) + rcs(AgeAtDelivery, 5) + rcs(AntenatalVisits, 5) +
+                          rcs(Education, 5) + PregnancyNumber + Scholar + PregnancyPlanned +
+                          ContBeMod + Refugee + ResStatus + SESabs, lrm, mod3sensses_imp, data = mod3dfsensses, pr = FALSE)
+print(mod3sensses)
+
+# make datadist for plotting
+dd <- datadist(mod3dfsensses)
+options(datadist = 'dd')
+
+# get ORs
+mod3s1ss <- as_tibble(summary(mod3sensses, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(15, 25), AntenatalVisits = c(0, 4),
+                              Education = c(0, 7), SESabs = c(1, 2)),
+                    rownames = NA)
+mod3s2ss <- as_tibble(summary(mod3sensses, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(25, 35), AntenatalVisits = c(4, 8),
+                              Education = c(7, 12), SESabs = c(1, 2)),
+                    rownames = NA)
+mod3s3ss <- as_tibble(summary(mod3sensses, DeliveryYear = c(2004, 2018), AgeAtDelivery = c(35, 45), AntenatalVisits = c(0, 4),
+                              Education = c(7, 12), SESabs = c(1, 2)),
+                    rownames = NA)
+mod3sss <- bind_rows(mod3s1ss, mod3s2ss, mod3s3ss) %>% rownames_to_column(., var = "Covariate") %>%
+  distinct(Low, High, Effect, .keep_all = TRUE) %>% column_to_rownames(., var = "Covariate")
+
+# clean up tibble
+mod3sssrows <- rownames(mod3sss %>% filter(Type == 1))
+mod3sss <- mod3sss %>% filter(Type == 2)
+rownames(mod3sss) <- mod3sssrows
+mod3sss <- mod3sss[order(row.names(mod3sss)), ]
+
+# Make row names nicer
+rownames(mod3sss) <- c("Age (35 vs. 25)",
+                    "Age (45 vs. 35)",
+                    "Age (25 vs. 15)",
+                    "Antenatal Visits (8 vs. 4)",
+                    "Antenatal Visits (4 vs. 0)",
+                    "Modern Contraceptive Use Prior to Pregnancy",
+                    "Delivery Year (2018 vs. 2004)",
+                    "Education (12 vs. 7 Years)",
+                    "Education (7 vs. 0 Years)",
+                    "Previous Pregnancies",
+                    "Other vs. Unintended Pregnancy",
+                    "Intended vs. Unintended Pregnancy",
+                    "Mozambican vs. South African",
+                    "Other Nationality vs. South African",
+                    "Temporary vs. Permanent",
+                    "Other vs. Permanent",
+                    "Current Student vs. Not",
+                    "Absolute Household Socioeconomic Status")
+```
+
 # Session Info
 
 ```{r fin}
@@ -3090,18 +3267,21 @@ Save(mod1ss2, "mod1sens2")
 Save(mod1ss3, "mod1sens3")
 Save(mod1ss4, "mod1sens4")
 Save(mod1ss5, "mod1sens5")
+Save(mod1sss, "mod1sensses")
 
 Save(mod2ss1, "mod2sens1")
 Save(mod2ss2, "mod2sens2")
 Save(mod2ss3, "mod2sens3")
 Save(mod2ss4, "mod2sens4")
 Save(mod2ss5, "mod2sens5")
+Save(mod2sss, "mod2sensses")
 
 Save(mod3ss1, "mod3sens1")
 Save(mod3ss2, "mod3sens2")
 Save(mod3ss3, "mod3sens3")
 Save(mod3ss4, "mod3sens4")
 Save(mod3ss5, "mod3sens5")
+Save(mod3sss, "mod3sensses")
 
 # show packages used
 sessionInfo()
