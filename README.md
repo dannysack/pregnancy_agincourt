@@ -4,7 +4,7 @@ This repository contains code for pregnancy-related healthcare utilization in Ag
 
 Initially, I submitted a data request at https://data.agincourt.co.za/index.php/home
 
-The data requested are described in the supplement of the published version (*TBD*).
+The data requested are described in the supplement of the published version (https://gh.bmj.com/content/6/10/e006915.full).
 
 This repository includes three files:
 1) cleaning.R, which shows how I cleaned the raw data
